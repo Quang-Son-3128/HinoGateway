@@ -10,6 +10,7 @@ public static class ConfigMapping
         Id = d.DeviceId,
         Driver = d.Driver,
         ScanIntervalMs = (int)d.ScanInterval.TotalMilliseconds,
+        FailureThreshold = d.FailureThreshold,
         Settings = new Dictionary<string, string>(d.Settings),
         // Read-only convenience: the tags currently referencing this connection (path = runtime id).
         Tags = d.Tags.Select(t => new TagDto
@@ -23,6 +24,8 @@ public static class ConfigMapping
             Description = t.Description,
             Scale = t.Scale,
             Offset = t.Offset,
+            Monotonic = t.Monotonic,
+            ScanIntervalMs = TagScanRate.ToMilliseconds(t.ScanInterval),
         }).ToList(),
     };
 
@@ -31,7 +34,10 @@ public static class ConfigMapping
     {
         DeviceId = d.Id.Trim(),
         Driver = d.Driver,
-        ScanInterval = TimeSpan.FromMilliseconds(d.ScanIntervalMs <= 0 ? 1000 : d.ScanIntervalMs),
+        // Validation happens before this edge mapping. Do not silently turn an invalid operator
+        // value into a different, apparently successful configuration.
+        ScanInterval = TimeSpan.FromMilliseconds(d.ScanIntervalMs),
+        FailureThreshold = d.FailureThreshold,
         Settings = new Dictionary<string, string>(d.Settings),
     };
 }

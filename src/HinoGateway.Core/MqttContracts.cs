@@ -4,13 +4,11 @@ namespace HinoGateway.Core;
 /// Configuration of the MQTT northbound publisher.
 ///
 /// <para>
-/// ⚠ <b>Reconstructed on 2026-08-10</b> after the source tree was lost. The original file did not
-/// survive; this version was rebuilt from the members that the surrounding code actually uses —
-/// <c>ProjectValidator.ValidateMqtt</c>, <c>JsonProjectStore</c>, <c>MqttSecrets</c> and the
-/// operational notes in the README. The <em>names and meanings</em> below are therefore right, but a
-/// setting that existed and was referenced nowhere else may be missing. Check a saved
-/// <c>hino.json</c> or <c>.hino</c> export from before the loss before trusting this to round-trip
-/// an old configuration.
+/// ⚠ <b>Reconstructed on 2026-08-10</b> after the source tree was lost, then <b>verified field by
+/// field</b> against a real <c>.hino</c> export taken at 09:49 that day
+/// (<c>hino-backup-20260810.hino</c> in the repo root). The property set below is exactly the one
+/// that export contains, so an old configuration round-trips. What cannot be recovered from an
+/// export is a member that never reaches JSON — a computed property or a helper method.
 /// </para>
 /// </summary>
 public sealed class MqttPublisherOptions
@@ -55,19 +53,17 @@ public sealed class MqttPublisherOptions
     public int BatchIntervalMs { get; set; } = 5000;
 
     /// <summary>Batches held in memory before the oldest are spooled to disk.</summary>
-    public int QueueCapacity { get; set; } = 1000;
+    public int QueueCapacity { get; set; } = 8192;
 
-    /// <summary>Ceiling on the on-disk spool (1 MB … 10 GB).</summary>
-    public long MaxSpoolBytes { get; set; } = 256L * 1024 * 1024;
-
-    /// <summary>Spool folder, relative to the executable unless rooted.</summary>
-    public string SpoolDirectory { get; set; } = "data/mqtt-spool";
+    /// <summary>
+    /// Ceiling on the on-disk spool (1 MB … 10 GB). The spool itself lives in
+    /// <c>data/mqtt-spool</c> beside the executable — a path the publisher owns, not a setting.
+    /// </summary>
+    public long MaxSpoolBytes { get; set; } = 268435456;
 
     public int ReconnectMinMs { get; set; } = 1000;
 
     public int ReconnectMaxMs { get; set; } = 30000;
-
-    public int KeepAliveSeconds { get; set; } = 30;
 }
 
 /// <summary>One tag reading as it travels northbound over MQTT.</summary>

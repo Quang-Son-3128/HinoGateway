@@ -16,16 +16,19 @@ public sealed class EngineHostedService : IHostedService
     private readonly IAlarmStore _alarmStore;
     private readonly DeviceEngine _engine;
     private readonly AlarmEngine _alarms;
+    private readonly ProjectValidator _validator;
     private readonly ILogger<EngineHostedService> _logger;
 
     public EngineHostedService(JsonProjectStore project, IConfigStore store, IAlarmStore alarmStore,
-        DeviceEngine engine, AlarmEngine alarms, ILogger<EngineHostedService> logger)
+        DeviceEngine engine, AlarmEngine alarms, ProjectValidator validator,
+        ILogger<EngineHostedService> logger)
     {
         _project = project;
         _store = store;
         _alarmStore = alarmStore;
         _engine = engine;
         _alarms = alarms;
+        _validator = validator;
         _logger = logger;
     }
 
@@ -48,6 +51,10 @@ public sealed class EngineHostedService : IHostedService
 
         var devices = await _store.GetDevicesAsync(cancellationToken);
 
+        var validation = await _validator.ValidateStoredAsync(_store, _alarmStore, cancellationToken);
+        foreach (var problem in validation)
+            _logger.LogError("Stored project validation: {Problem}", problem);
+
         // Alarms evaluate off the tag stream, so they are wired up before the workers start:
         // AddObserver is lossless (unlike the UI's realtime channel), so no sample is missed.
         var definitions = AlarmMapping.ToDefinitions(
@@ -59,13 +66,16 @@ public sealed class EngineHostedService : IHostedService
 
         // A connection with an unusable configuration is reported as faulted, not thrown: the
         // gateway must always come up (it may be an unattended IPC recovering from a power cut).
-        var applied = await _engine.LoadAsync(devices);
+        var applied = await _engine.LoadAsync(devices, await _store.GetInternalTagsAsync(cancellationToken));
         _engine.StartAll();
 
-        _logger.LogInformation("HinoGateway engine started with {Count} connection(s) and {Alarms} alarm(s)",
-            applied.Started, definitions.Count);
+        _logger.LogInformation(
+            "HinoGateway engine started with {Count} connection(s), {Alarms} alarm(s) and {Internal} internal tag(s)",
+            applied.Started, definitions.Count, _engine.InternalTags.Total);
         foreach (var rejected in applied.Rejected)
             _logger.LogError("Connection {DeviceId} is not running: {Error}", rejected.DeviceId, rejected.LastError);
+        foreach (var dropped in applied.DroppedTags.Where(t => t.DeviceId == DeviceEngine.InternalDeviceId))
+            _logger.LogError("Tag {TagId} is not running: {Error}", dropped.TagId, dropped.Reason);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

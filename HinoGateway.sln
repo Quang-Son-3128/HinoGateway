@@ -25,6 +25,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HinoGateway.Drivers.Modbus"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HinoGateway.Northbound.Iec104", "src\HinoGateway.Northbound.Iec104\HinoGateway.Northbound.Iec104.csproj", "{F9994306-6B96-4417-A22B-24C71ABA0C31}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HinoGateway.Expressions", "src\HinoGateway.Expressions\HinoGateway.Expressions.csproj", "{D27B58B2-05C2-44F8-BB4E-74F1A2BE898B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -70,6 +72,10 @@ Global
 		{F9994306-6B96-4417-A22B-24C71ABA0C31}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F9994306-6B96-4417-A22B-24C71ABA0C31}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F9994306-6B96-4417-A22B-24C71ABA0C31}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D27B58B2-05C2-44F8-BB4E-74F1A2BE898B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D27B58B2-05C2-44F8-BB4E-74F1A2BE898B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D27B58B2-05C2-44F8-BB4E-74F1A2BE898B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D27B58B2-05C2-44F8-BB4E-74F1A2BE898B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{50FD6020-996E-444E-8F7B-AD8BD12CCB8D} = {B148F1F8-72E0-48B4-9DF4-1149EA8D51B2}
@@ -81,5 +87,6 @@ Global
 		{2DDA28E3-58E3-4F91-AF99-1D294F2EC32E} = {B148F1F8-72E0-48B4-9DF4-1149EA8D51B2}
 		{D1408196-8225-4302-ACB5-6C3A15C427D0} = {B148F1F8-72E0-48B4-9DF4-1149EA8D51B2}
 		{F9994306-6B96-4417-A22B-24C71ABA0C31} = {B148F1F8-72E0-48B4-9DF4-1149EA8D51B2}
+		{D27B58B2-05C2-44F8-BB4E-74F1A2BE898B} = {B148F1F8-72E0-48B4-9DF4-1149EA8D51B2}
 	EndGlobalSection
 EndGlobal

@@ -17,7 +17,7 @@ namespace HinoGateway.Engine;
 /// Nothing here ever blocks a poll loop; the authoritative latest state is always available from
 /// <see cref="Snapshot"/> regardless of what any queue did.
 /// </summary>
-public sealed class TagStore
+public sealed class TagStore : ITagValueSource
 {
     private readonly ConcurrentDictionary<string, TagValue> _latest = new();
     private readonly int _defaultCapacity;
@@ -131,7 +131,55 @@ public sealed class TagStore
         Apply(batch);
     }
 
+    /// <summary>
+    /// Downgrade a set of tags to <see cref="Quality.Uncertain"/> while keeping their last known
+    /// value <em>and its original source timestamp</em>: the reading is still the best one available
+    /// but it is no longer current, and its true age is what tells a consumer how much to trust it.
+    /// This is what a device that missed a poll produces while its link is still being kept —
+    /// <see cref="MarkBad"/> is for a link that has actually been given up on.
+    ///
+    /// A tag that has never been read has no value to be uncertain about, so it is marked Bad.
+    /// </summary>
+    public void MarkUncertain(IEnumerable<TagDefinition> tags, string reason)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var batch = new List<TagRead>();
+        foreach (var tag in tags)
+        {
+            batch.Add(_latest.TryGetValue(tag.Id, out var previous) && previous.Value is not null
+                // LastChanged must be stamped here: a quality transition IS a change, and Apply only
+                // preserves the previous instant when value AND quality both repeat — which is what
+                // keeps a tag that stays Uncertain from restamping itself on every scan.
+                ? new TagRead(tag.Id, previous with
+                {
+                    Quality = Quality.Uncertain,
+                    StatusText = reason,
+                    LastChanged = now,
+                })
+                : new TagRead(tag.Id, TagValue.Bad(reason, now)));
+        }
+        Apply(batch);
+    }
+
     public bool TryGet(string tagId, out TagValue value) => _latest.TryGetValue(tagId, out value!);
+
+    /// <summary>Quality totals without copying values or serializing a full tag snapshot.</summary>
+    public (int Total, int Good, int Uncertain, int Bad) QualityCounts()
+    {
+        var good = 0;
+        var uncertain = 0;
+        var bad = 0;
+        foreach (var value in _latest.Values)
+        {
+            switch (value.Quality)
+            {
+                case Quality.Good: good++; break;
+                case Quality.Uncertain: uncertain++; break;
+                case Quality.Bad: bad++; break;
+            }
+        }
+        return (good + uncertain + bad, good, uncertain, bad);
+    }
 
     private long _observerErrors;
 
@@ -180,7 +228,9 @@ public sealed class TagSubscription : IDisposable
         _channel = Channel.CreateBounded<IReadOnlyList<TagRead>>(new BoundedChannelOptions(capacity)
         {
             FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = true,
+            // Publish() evicts the oldest batch through Reader.TryRead when the queue is full, while
+            // the consumer reads concurrently. That makes the channel multi-reader by construction.
+            SingleReader = false,
             SingleWriter = false,
         });
     }

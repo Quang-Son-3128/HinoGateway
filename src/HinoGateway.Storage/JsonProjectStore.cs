@@ -16,7 +16,7 @@ namespace HinoGateway.Storage;
 /// Reads are served from memory (the engine and the UI poll them constantly); every mutation
 /// rewrites the file atomically — temp file first, then an atomic replace that also leaves a
 /// <c>.bak</c> of the previous good version, so a power cut mid-write cannot leave a half-written
-/// configuration behind. Use <see cref="BeginBatch"/> around bulk edits to write only once.
+/// configuration behind. Use <see cref="BeginTransaction"/> around bulk edits to write only once.
 /// </summary>
 public sealed class JsonProjectStore : IConfigStore, IAlarmStore
 {
@@ -30,12 +30,11 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     private readonly string _path;
     private readonly ILogger<JsonProjectStore> _logger;
     private readonly object _gate = new();
+    private readonly object _saveGate = new();
 
     private HinoProject _project = new();
-    private HinoProject? _rollbackTo;
-    private int _batchDepth;
-    private bool _pendingWrite;
-    private bool _transactionFailed;
+    private readonly AsyncLocal<TransactionContext?> _ambientTransaction = new();
+    private TransactionContext? _activeTransaction;
 
     public JsonProjectStore(string path, ILogger<JsonProjectStore> logger)
     {
@@ -50,7 +49,7 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     /// <summary>True when the file did not exist at startup (a fresh install to be seeded).</summary>
     public bool IsEmpty
     {
-        get { lock (_gate) return _project.Devices.Count == 0 && _project.Tags.Count == 0; }
+        get { lock (_gate) return CurrentProject.Devices.Count == 0 && CurrentProject.Tags.Count == 0; }
     }
 
     // --- loading / saving ----------------------------------------------------
@@ -118,46 +117,48 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         lock (_gate)
         {
-            if (_batchDepth++ == 0)
-            {
-                // Keep a pristine copy so an abandoned transaction can put everything back.
-                _rollbackTo = JsonSerializer.Deserialize<HinoProject>(JsonSerializer.Serialize(_project, Json), Json);
-                _transactionFailed = false;
-            }
+            if (_ambientTransaction.Value is not null)
+                throw new InvalidOperationException("Nested configuration transactions are not supported.");
+            if (_activeTransaction is not null)
+                throw new InvalidOperationException("Another configuration transaction is already in progress.");
+
+            var context = new TransactionContext(Clone(_project));
+            _activeTransaction = context;
+            _ambientTransaction.Value = context;
+            return new TransactionScope(this, context);
         }
-        return new TransactionScope(this);
     }
 
     /// <summary>End the innermost scope. The outermost one decides: persist, or restore and discard.</summary>
-    private void EndTransaction(bool committed)
+    private void EndTransaction(TransactionContext context, bool committed)
     {
-        var save = false;
         lock (_gate)
         {
+            if (!ReferenceEquals(_activeTransaction, context))
+                throw new InvalidOperationException("The configuration transaction is no longer active.");
+
+            if (committed)
+                _project = context.Project;
+
             if (!committed)
-                _transactionFailed = true;
-
-            if (--_batchDepth > 0)
-                return;   // an inner scope closed; the outermost one still decides
-
-            if (_transactionFailed)
             {
-                if (_rollbackTo is not null)
+                if (_project is not null)
                 {
-                    _project = _rollbackTo;
+                    // The committed project was never modified; abandoning the private snapshot is enough.
                     _logger.LogWarning("Configuration change was rolled back — nothing was written to {Path}", _path);
                 }
-                _pendingWrite = false;
+                _activeTransaction = null;
             }
             else
             {
-                save = _pendingWrite;
+                _activeTransaction = null;
             }
 
-            _rollbackTo = null;
+            if (ReferenceEquals(_ambientTransaction.Value, context))
+                _ambientTransaction.Value = null;
         }
 
-        if (save)
+        if (committed && context.Dirty)
             Save();
     }
 
@@ -166,16 +167,25 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         lock (_gate)
         {
-            if (_batchDepth > 0)
+            if (_ambientTransaction.Value is { } transaction)
             {
-                _pendingWrite = true;
+                transaction.Dirty = true;
                 return;
             }
+            if (_activeTransaction is not null)
+                throw new InvalidOperationException(
+                    "Configuration is being changed by another request. Retry after that transaction completes.");
         }
         Save();
     }
 
     private void Save()
+    {
+        lock (_saveGate)
+            SaveCore();
+    }
+
+    private void SaveCore()
     {
         string json;
         lock (_gate)
@@ -184,7 +194,6 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
             _project.Version = HinoProject.CurrentVersion;
             _project.ExportedAt = DateTimeOffset.UtcNow;
             json = JsonSerializer.Serialize(_project, Json);
-            _pendingWrite = false;
         }
 
         var temp = _path + ".tmp";
@@ -204,19 +213,27 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
         catch (Exception ex)
         {
             // The in-memory configuration stays authoritative and the gateway keeps polling; the
-            // operator needs to know the change will not survive a restart.
+            // request must still fail: returning success here tells the operator that a change is
+            // durable when it will disappear at the next restart.
             _logger.LogError(ex, "Could not write the project file {Path} — the change is live but NOT persisted", _path);
             try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best effort */ }
+            throw new ConfigurationPersistenceException(_path,
+                $"Could not persist the gateway project to '{_path}'. The change is live in memory but will not survive a restart.", ex);
         }
     }
 
     private sealed class TransactionScope : IConfigTransaction
     {
         private readonly JsonProjectStore _store;
+        private readonly TransactionContext _context;
         private bool _committed;
         private bool _closed;
 
-        public TransactionScope(JsonProjectStore store) => _store = store;
+        public TransactionScope(JsonProjectStore store, TransactionContext context)
+        {
+            _store = store;
+            _context = context;
+        }
 
         public void Commit()
         {
@@ -224,7 +241,7 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
                 throw new InvalidOperationException("This configuration transaction has already been closed.");
             _committed = true;
             _closed = true;
-            _store.EndTransaction(committed: true);
+            _store.EndTransaction(_context, committed: true);
         }
 
         // Disposing without a commit — including when an exception unwinds the using block — rolls back.
@@ -233,8 +250,27 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
             if (_closed)
                 return;
             _closed = true;
-            _store.EndTransaction(_committed);
+            _store.EndTransaction(_context, _committed);
         }
+    }
+
+    private sealed class TransactionContext(HinoProject project)
+    {
+        public HinoProject Project { get; } = project;
+        public bool Dirty { get; set; }
+        public Dictionary<string, TagDto> TagsById { get; } =
+            project.Tags.ToDictionary(t => t.Id, StringComparer.Ordinal);
+    }
+
+    private HinoProject CurrentProject => _ambientTransaction.Value?.Project ?? _project;
+
+    private HinoProject ProjectForMutation()
+    {
+        var ambient = _ambientTransaction.Value;
+        if (_activeTransaction is not null && !ReferenceEquals(_activeTransaction, ambient))
+            throw new InvalidOperationException(
+                "Configuration is being changed by another request. Retry after that transaction completes.");
+        return ambient?.Project ?? _project;
     }
 
     // --- connections ---------------------------------------------------------
@@ -243,9 +279,13 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         lock (_gate)
         {
-            var paths = TagPaths.BuildGroupPaths(_project.Groups);
-            IReadOnlyList<DeviceConfig> devices = _project.Devices
-                .Select(d => ToConfig(d, _project.Tags.Where(t => Same(t.DeviceId, d.Id)), paths))
+            var project = CurrentProject;
+            var paths = TagPaths.BuildGroupPaths(project.Groups);
+            var tagsByDevice = project.Tags
+                .GroupBy(t => t.DeviceId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => (IEnumerable<TagDto>)g, StringComparer.OrdinalIgnoreCase);
+            IReadOnlyList<DeviceConfig> devices = project.Devices
+                .Select(d => ToConfig(d, tagsByDevice.GetValueOrDefault(d.Id) ?? [], paths))
                 .ToList();
             return Task.FromResult(devices);
         }
@@ -255,12 +295,13 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         lock (_gate)
         {
-            var device = _project.Devices.FirstOrDefault(d => Same(d.Id, deviceId));
+            var project = CurrentProject;
+            var device = project.Devices.FirstOrDefault(d => Same(d.Id, deviceId));
             if (device is null)
                 return Task.FromResult<DeviceConfig?>(null);
-            var paths = TagPaths.BuildGroupPaths(_project.Groups);
+            var paths = TagPaths.BuildGroupPaths(project.Groups);
             return Task.FromResult<DeviceConfig?>(
-                ToConfig(device, _project.Tags.Where(t => Same(t.DeviceId, deviceId)), paths));
+                ToConfig(device, project.Tags.Where(t => Same(t.DeviceId, deviceId)), paths));
         }
     }
 
@@ -268,14 +309,16 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         lock (_gate)
         {
-            var existing = _project.Devices.FirstOrDefault(d => Same(d.Id, device.DeviceId));
+            var project = ProjectForMutation();
+            var existing = project.Devices.FirstOrDefault(d => Same(d.Id, device.DeviceId));
             if (existing is null)
             {
-                _project.Devices.Add(new DeviceDto
+                project.Devices.Add(new DeviceDto
                 {
                     Id = device.DeviceId,
                     Driver = device.Driver,
                     ScanIntervalMs = (int)device.ScanInterval.TotalMilliseconds,
+                    FailureThreshold = device.FailureThreshold,
                     Settings = new Dictionary<string, string>(device.Settings),
                 });
             }
@@ -283,6 +326,7 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
             {
                 existing.Driver = device.Driver;
                 existing.ScanIntervalMs = (int)device.ScanInterval.TotalMilliseconds;
+                existing.FailureThreshold = device.FailureThreshold;
                 existing.Settings = new Dictionary<string, string>(device.Settings);
                 existing.Tags = new List<TagDto>();   // tags live at the top level
             }
@@ -295,7 +339,7 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         bool removed;
         lock (_gate)
-            removed = _project.Devices.RemoveAll(d => Same(d.Id, deviceId)) > 0;
+            removed = ProjectForMutation().Devices.RemoveAll(d => Same(d.Id, deviceId)) > 0;
         if (removed)
             SaveOrDefer();
         return Task.FromResult(removed);
@@ -307,7 +351,7 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         lock (_gate)
         {
-            IReadOnlyList<TagGroupDto> groups = _project.Groups.Select(Clone).ToList();
+            IReadOnlyList<TagGroupDto> groups = CurrentProject.Groups.Select(Clone).ToList();
             return Task.FromResult(groups);
         }
     }
@@ -316,9 +360,10 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         lock (_gate)
         {
-            var existing = _project.Groups.FirstOrDefault(g => g.Id == group.Id);
+            var project = ProjectForMutation();
+            var existing = project.Groups.FirstOrDefault(g => g.Id == group.Id);
             if (existing is null)
-                _project.Groups.Add(Clone(group));
+                project.Groups.Add(Clone(group));
             else
             {
                 existing.ParentId = group.ParentId;
@@ -334,7 +379,8 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
         bool removed;
         lock (_gate)
         {
-            if (_project.Groups.All(g => g.Id != groupId))
+            var project = ProjectForMutation();
+            if (project.Groups.All(g => g.Id != groupId))
                 return Task.FromResult(false);
 
             // Take the whole subtree with it, tags included.
@@ -344,13 +390,13 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
             while (queue.Count > 0)
             {
                 var parent = queue.Dequeue();
-                foreach (var child in _project.Groups.Where(g => g.ParentId == parent))
+                foreach (var child in project.Groups.Where(g => g.ParentId == parent))
                     if (doomed.Add(child.Id))
                         queue.Enqueue(child.Id);
             }
 
-            _project.Tags.RemoveAll(t => t.GroupId is not null && doomed.Contains(t.GroupId));
-            _project.Groups.RemoveAll(g => doomed.Contains(g.Id));
+            project.Tags.RemoveAll(t => t.GroupId is not null && doomed.Contains(t.GroupId));
+            project.Groups.RemoveAll(g => doomed.Contains(g.Id));
             removed = true;
         }
         SaveOrDefer();
@@ -363,9 +409,41 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         lock (_gate)
         {
-            var paths = TagPaths.BuildGroupPaths(_project.Groups);
-            IReadOnlyList<TagDto> tags = _project.Tags
+            var project = CurrentProject;
+            var paths = TagPaths.BuildGroupPaths(project.Groups);
+            IReadOnlyList<TagDto> tags = project.Tags
                 .Select(t => { var copy = Clone(t); copy.Path = TagPaths.TagPath(paths, t.GroupId, t.Name); return copy; })
+                .ToList();
+            return Task.FromResult(tags);
+        }
+    }
+
+    public Task<IReadOnlyList<TagDefinition>> GetInternalTagsAsync(CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var project = CurrentProject;
+            var paths = TagPaths.BuildGroupPaths(project.Groups);
+            IReadOnlyList<TagDefinition> tags = project.Tags
+                .Where(t => t.Kind.IsInternal())
+                .Select(t => new TagDefinition
+                {
+                    Id = TagPaths.TagPath(paths, t.GroupId, t.Name),
+                    Name = t.Name,
+                    Kind = t.Kind,
+                    Address = "",
+                    Expression = t.Expression,
+                    InitialValue = t.InitialValue,
+                    Retentive = t.Retentive,
+                    EvalMode = t.EvalMode,
+                    DataType = t.DataType,
+                    Unit = t.Unit,
+                    Description = t.Description,
+                    // Scale/Offset are deliberately not carried: they are applied by the device
+                    // worker on a raw device reading, and an internal tag has none. An expression
+                    // does its own arithmetic; a memory tag holds what was written to it.
+                    ScanInterval = TagScanRate.FromMilliseconds(t.ScanIntervalMs),
+                })
                 .ToList();
             return Task.FromResult(tags);
         }
@@ -375,25 +453,37 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         lock (_gate)
         {
-            var existing = _project.Tags.FirstOrDefault(t => t.Id == tag.Id);
+            var project = ProjectForMutation();
+            var transaction = _ambientTransaction.Value;
+            var existing = transaction is not null
+                ? transaction.TagsById.GetValueOrDefault(tag.Id)
+                : project.Tags.FirstOrDefault(t => t.Id == tag.Id);
             if (existing is null)
             {
                 var copy = Clone(tag);
                 copy.Id = string.IsNullOrWhiteSpace(tag.Id) ? Guid.NewGuid().ToString("N") : tag.Id.Trim();
                 copy.Path = "";   // derived on read, never stored
-                _project.Tags.Add(copy);
+                project.Tags.Add(copy);
+                transaction?.TagsById.TryAdd(copy.Id, copy);
             }
             else
             {
                 existing.GroupId = tag.GroupId;
                 existing.DeviceId = tag.DeviceId;
+                existing.Kind = tag.Kind;
                 existing.Name = tag.Name;
                 existing.Address = tag.Address;
+                existing.Expression = tag.Expression;
+                existing.InitialValue = tag.InitialValue;
+                existing.Retentive = tag.Retentive;
+                existing.EvalMode = tag.EvalMode;
                 existing.DataType = tag.DataType;
                 existing.Unit = tag.Unit;
                 existing.Description = tag.Description;
                 existing.Scale = tag.Scale;
                 existing.Offset = tag.Offset;
+                existing.Monotonic = tag.Monotonic;
+                existing.ScanIntervalMs = tag.ScanIntervalMs;
                 existing.Path = "";
             }
         }
@@ -405,8 +495,29 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         bool removed;
         lock (_gate)
-            removed = _project.Tags.RemoveAll(t => t.Id == tagId) > 0;
+        {
+            removed = ProjectForMutation().Tags.RemoveAll(t => t.Id == tagId) > 0;
+            if (removed)
+                _ambientTransaction.Value?.TagsById.Remove(tagId);
+        }
         if (removed)
+            SaveOrDefer();
+        return Task.FromResult(removed);
+    }
+
+    public Task<int> ClearTopologyAsync(CancellationToken ct = default)
+    {
+        int removed;
+        lock (_gate)
+        {
+            var project = ProjectForMutation();
+            removed = project.Devices.Count + project.Groups.Count + project.Tags.Count;
+            project.Devices.Clear();
+            project.Groups.Clear();
+            project.Tags.Clear();
+            _ambientTransaction.Value?.TagsById.Clear();
+        }
+        if (removed > 0)
             SaveOrDefer();
         return Task.FromResult(removed);
     }
@@ -417,9 +528,10 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         lock (_gate)
         {
-            var paths = TagPaths.BuildGroupPaths(_project.Groups);
-            var tagPaths = _project.Tags.ToDictionary(t => t.Id, t => TagPaths.TagPath(paths, t.GroupId, t.Name));
-            IReadOnlyList<AlarmDto> alarms = _project.Alarms
+            var project = CurrentProject;
+            var paths = TagPaths.BuildGroupPaths(project.Groups);
+            var tagPaths = project.Tags.ToDictionary(t => t.Id, t => TagPaths.TagPath(paths, t.GroupId, t.Name));
+            IReadOnlyList<AlarmDto> alarms = project.Alarms
                 .Select(a => { var copy = Clone(a); copy.TagPath = tagPaths.GetValueOrDefault(a.TagId, ""); return copy; })
                 .ToList();
             return Task.FromResult(alarms);
@@ -430,13 +542,14 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         lock (_gate)
         {
-            var existing = _project.Alarms.FirstOrDefault(a => a.Id == alarm.Id);
+            var project = ProjectForMutation();
+            var existing = project.Alarms.FirstOrDefault(a => a.Id == alarm.Id);
             if (existing is null)
             {
                 var copy = Clone(alarm);
                 copy.Id = string.IsNullOrWhiteSpace(alarm.Id) ? Guid.NewGuid().ToString("N") : alarm.Id.Trim();
                 copy.TagPath = "";   // derived on read
-                _project.Alarms.Add(copy);
+                project.Alarms.Add(copy);
             }
             else
             {
@@ -463,7 +576,7 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         bool removed;
         lock (_gate)
-            removed = _project.Alarms.RemoveAll(a => a.Id == alarmId) > 0;
+            removed = ProjectForMutation().Alarms.RemoveAll(a => a.Id == alarmId) > 0;
         if (removed)
             SaveOrDefer();
         return Task.FromResult(removed);
@@ -475,12 +588,13 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         lock (_gate)
         {
-            var stored = _project.Iec104;
+            var project = CurrentProject;
+            var stored = project.Iec104;
             if (stored is null)
                 return Task.FromResult(new Iec104ServerOptions());
 
-            var paths = TagPaths.BuildGroupPaths(_project.Groups);
-            var tagPaths = _project.Tags.ToDictionary(t => t.Id, t => TagPaths.TagPath(paths, t.GroupId, t.Name));
+            var paths = TagPaths.BuildGroupPaths(project.Groups);
+            var tagPaths = project.Tags.ToDictionary(t => t.Id, t => TagPaths.TagPath(paths, t.GroupId, t.Name));
 
             var copy = Clone(stored);
             foreach (var point in copy.Points)
@@ -493,11 +607,30 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         lock (_gate)
         {
+            var project = ProjectForMutation();
             var copy = Clone(options);
             foreach (var point in copy.Points)
                 point.TagPath = "";   // derived on read, never stored
-            _project.Iec104 = copy;
+            project.Iec104 = copy;
         }
+        SaveOrDefer();
+        return Task.CompletedTask;
+    }
+
+    // --- northbound: MQTT ----------------------------------------------------
+
+    public Task<MqttPublisherOptions> GetMqttAsync(CancellationToken ct = default)
+    {
+        lock (_gate)
+            return Task.FromResult(CurrentProject.Mqtt is { } stored
+                ? Clone(stored)
+                : new MqttPublisherOptions());
+    }
+
+    public Task SaveMqttAsync(MqttPublisherOptions options, CancellationToken ct = default)
+    {
+        lock (_gate)
+            ProjectForMutation().Mqtt = Clone(options);
         SaveOrDefer();
         return Task.CompletedTask;
     }
@@ -510,14 +643,26 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     private static Iec104ServerOptions Clone(Iec104ServerOptions options) =>
         JsonSerializer.Deserialize<Iec104ServerOptions>(JsonSerializer.Serialize(options, Json), Json)!;
 
+    private static HinoProject Clone(HinoProject project) =>
+        JsonSerializer.Deserialize<HinoProject>(JsonSerializer.Serialize(project, Json), Json)!;
+
+    private static MqttPublisherOptions Clone(MqttPublisherOptions options) =>
+        JsonSerializer.Deserialize<MqttPublisherOptions>(JsonSerializer.Serialize(options, Json), Json)!;
+
     private static DeviceConfig ToConfig(DeviceDto d, IEnumerable<TagDto> tags,
         IReadOnlyDictionary<string, string> groupPaths) => new()
     {
         DeviceId = d.Id,
         Driver = d.Driver,
         ScanInterval = TimeSpan.FromMilliseconds(d.ScanIntervalMs <= 0 ? 1000 : d.ScanIntervalMs),
+        // A project file written before this setting existed deserialises to 0; keep those devices
+        // on the shipped default rather than on a threshold that would fault them on the first blip.
+        FailureThreshold = d.FailureThreshold <= 0 ? 3 : d.FailureThreshold,
         Settings = new Dictionary<string, string>(d.Settings),
-        Tags = tags.Select(t => new TagDefinition
+        // Only device tags belong to a connection. Without this filter a memory tag that still
+        // carries the connection it was converted from would be handed to the driver, which would
+        // dutifully try to read an empty address off a PLC.
+        Tags = tags.Where(t => t.Kind == TagKind.Device).Select(t => new TagDefinition
         {
             Id = TagPaths.TagPath(groupPaths, t.GroupId, t.Name),
             Name = t.Name,
@@ -527,6 +672,8 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
             Description = t.Description,
             Scale = t.Scale,
             Offset = t.Offset,
+            Monotonic = t.Monotonic,
+            ScanInterval = TagScanRate.FromMilliseconds(t.ScanIntervalMs),
         }).ToList(),
     };
 
@@ -539,14 +686,21 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
         Id = t.Id,
         GroupId = t.GroupId,
         DeviceId = t.DeviceId,
+        Kind = t.Kind,
         Name = t.Name,
         Path = t.Path,
         Address = t.Address,
+        Expression = t.Expression,
+        InitialValue = t.InitialValue,
+        Retentive = t.Retentive,
+        EvalMode = t.EvalMode,
         DataType = t.DataType,
         Unit = t.Unit,
         Description = t.Description,
         Scale = t.Scale,
         Offset = t.Offset,
+        Monotonic = t.Monotonic,
+        ScanIntervalMs = t.ScanIntervalMs,
     };
 
     private static AlarmDto Clone(AlarmDto a) => new()

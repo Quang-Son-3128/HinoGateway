@@ -163,19 +163,53 @@ public sealed class ConfigController : ControllerBase
         if (dto.Name.Contains('/'))
             return BadRequest("Tag names cannot contain '/' (it is the path separator).");
 
-        var devices = await _store.GetDevicesAsync(ct);
-        if (!devices.Any(d => string.Equals(d.DeviceId, dto.DeviceId, StringComparison.OrdinalIgnoreCase)))
-            return BadRequest($"Connection '{dto.DeviceId}' does not exist.");
+        if (!Enum.IsDefined(dto.Kind))
+            return BadRequest("Unknown tag kind.");
 
-        if (dto.GroupId is not null && !(await _store.GetGroupsAsync(ct)).Any(g => g.Id == dto.GroupId))
+        var devices = await _store.GetDevicesAsync(ct);
+        if (dto.Kind == TagKind.Device)
+        {
+            if (!devices.Any(d => string.Equals(d.DeviceId, dto.DeviceId, StringComparison.OrdinalIgnoreCase)))
+                return BadRequest($"Connection '{dto.DeviceId}' does not exist.");
+        }
+        else
+        {
+            // A memory or expression tag belongs to no connection. Clearing the fields that only mean
+            // something for a device tag keeps the stored project honest — and stops a tag converted
+            // from a device tag from carrying an address a driver would try to read.
+            dto.DeviceId = "";
+            dto.Address = "";
+            dto.Scale = 1.0;
+            dto.Offset = 0.0;
+            dto.Monotonic = false;
+            if (dto.Kind == TagKind.Expression)
+                dto.InitialValue = null;
+            if (dto.Kind == TagKind.Memory)
+                dto.Expression = null;
+        }
+
+        var groups = await _store.GetGroupsAsync(ct);
+        if (dto.GroupId is not null && !groups.Any(g => g.Id == dto.GroupId))
             return BadRequest($"Folder '{dto.GroupId}' does not exist.");
 
         // The runtime tag id is folder path + name, so (folder, name) must be unique.
-        var clash = (await _store.GetTagsAsync(ct)).FirstOrDefault(t =>
+        var storedTags = (await _store.GetTagsAsync(ct)).ToList();
+        var clash = storedTags.FirstOrDefault(t =>
             t.Id != dto.Id && t.GroupId == dto.GroupId &&
             string.Equals(t.Name, dto.Name, StringComparison.OrdinalIgnoreCase));
         if (clash is not null)
             return BadRequest($"A tag named '{dto.Name}' already exists in this folder.");
+
+        var index = storedTags.FindIndex(t => t.Id == dto.Id);
+        if (index >= 0) storedTags[index] = dto;
+        else storedTags.Add(dto);
+
+        if (dto.Kind != TagKind.Device)
+        {
+            var internalProblems = ProjectValidator.ValidateInternalTag(dto, storedTags, groups);
+            if (internalProblems.Count > 0)
+                return BadRequest(internalProblems);
+        }
 
         await _store.UpsertTagAsync(dto, ct);
         return NoContent();
@@ -210,7 +244,7 @@ public sealed class ConfigController : ControllerBase
         [FromServices] ILogger<ConfigController> logger, CancellationToken ct)
     {
         var devices = await _store.GetDevicesAsync(ct);
-        var applied = await engine.ReloadAsync(devices);
+        var applied = await engine.ReloadAsync(devices, await _store.GetInternalTagsAsync(ct));
         alarmEngine.Reload(AlarmMapping.ToDefinitions(
             await alarms.GetAlarmsAsync(ct), await _store.GetTagsAsync(ct), logger));
         return applied;
@@ -298,7 +332,9 @@ public sealed class ConfigController : ControllerBase
         {
             if (string.IsNullOrWhiteSpace(t.Id) || string.IsNullOrWhiteSpace(t.Name))
                 return BadRequest("A tag in the file has an empty id or name.");
-            if (!deviceIds.Contains(t.DeviceId))
+            // Only a device tag has a connection to point at; the formulas and initial values of the
+            // other kinds are checked by the project validation.
+            if (t.Kind == TagKind.Device && !deviceIds.Contains(t.DeviceId))
                 return BadRequest($"Tag '{t.Name}' references missing connection '{t.DeviceId}'.");
             if (t.GroupId is not null && !groupIds.Contains(t.GroupId))
                 return BadRequest($"Tag '{t.Name}' references missing folder '{t.GroupId}'.");

@@ -1,3 +1,6 @@
+using Microsoft.AspNetCore.Authentication;
+using HinoGateway.Server;
+using HinoGateway.Server.Security;
 using HinoGateway.Core;
 using HinoGateway.Drivers.Simulator;
 using HinoGateway.Engine;
@@ -12,10 +15,10 @@ builder.Services.AddSignalR();
 
 // --- Configuration: one JSON project file, no database ------------------------
 // A gateway has to be deployable by copying a folder onto an industrial PC, so the configuration
-// is a file the engineer can read, diff and back up — not a schema that needs migrating in the
+// is a file the engineer can read, diff and back up â€” not a schema that needs migrating in the
 // field. The store is a singleton: it serves reads from memory and writes the file on change.
 //
-// A relative path is resolved against the folder the application itself lives in — deliberately NOT
+// A relative path is resolved against the folder the application itself lives in â€” deliberately NOT
 // the content root or the working directory, which differ depending on how the gateway was started
 // and would leave two configuration files quietly disagreeing with each other. The project file
 // travels with the binaries; set Config:Path to an absolute path to keep it elsewhere.
@@ -32,13 +35,46 @@ builder.Services.AddSingleton<IAlarmStore>(sp => sp.GetRequiredService<JsonProje
 builder.Services.AddSingleton<IAlarmJournal>(sp => new InMemoryAlarmJournal(
     builder.Configuration.GetValue<int?>("Alarms:JournalCapacity") ?? 2000));
 
+// Retentive memory tags keep their value in a sidecar beside the project. It is operational state,
+// not configuration: it changes whenever an operator moves a setpoint, and it must not travel inside
+// a project export. Same path rules as the project file.
+// (Re-added 2026-08-10 while rebuilding after the source loss.)
+var retainedPath = builder.Configuration["Config:RetainedPath"] ?? "hino.retain.json";
+builder.Services.AddSingleton(sp => new RetainedValueStore(
+    System.IO.Path.IsPathRooted(retainedPath)
+        ? retainedPath
+        : System.IO.Path.Combine(AppContext.BaseDirectory, retainedPath),
+    sp.GetRequiredService<ILogger<RetainedValueStore>>()));
+builder.Services.AddSingleton<IRetainedValueStore>(sp => sp.GetRequiredService<RetainedValueStore>());
+
+// --- Security ----------------------------------------------------------------
+// Every request gets an identity even when security is switched off, and that identity is Viewer
+// unless the request came from the machine itself. Treating an unauthenticated request as a full
+// operator would mean anyone who can reach the port can command a PLC.
+var security = builder.Configuration.GetSection("Security").Get<GatewaySecurityOptions>()
+               ?? new GatewaySecurityOptions();
+GatewaySecurityValidation.Validate(security, builder.Configuration);
+builder.Services.AddSingleton(security);
+builder.Services.AddAuthentication(GatewayApiKeyHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, GatewayApiKeyHandler>(GatewayApiKeyHandler.SchemeName, _ => { });
+builder.Services.AddAuthorization(options =>
+{
+    foreach (var policy in new[] { GatewayPolicies.Viewer, GatewayPolicies.Operator, GatewayPolicies.Admin })
+    {
+        var accepted = GatewayPolicies.AtLeast(policy);
+        options.AddPolicy(policy, p => p.RequireAssertion(context =>
+            accepted.Any(role => context.User.IsInRole(role))));
+    }
+});
+
 // --- Engine composition ------------------------------------------------------
 builder.Services.AddSingleton<TagStore>();
 builder.Services.AddSingleton<DeviceEngine>();
+builder.Services.AddSingleton<ProjectValidator>();
 // Alarm evaluation is hooked into the tag stream by EngineHostedService at startup.
 builder.Services.AddSingleton<AlarmEngine>();
 
-// Driver factories — one registration per driver package. Add S7/IEC104/... here later.
+// Driver factories â€” one registration per driver package. Add S7/IEC104/... here later.
 builder.Services.AddSingleton<IDeviceDriverFactory, SimulatorDriverFactory>();
 builder.Services.AddSingleton<IDeviceDriverFactory, HinoGateway.Drivers.Modbus.ModbusTcpDriverFactory>();
 
@@ -57,6 +93,9 @@ var app = builder.Build();
 // Serve the Blazor WebAssembly client that this project references.
 app.UseBlazorFrameworkFiles();
 app.UseStaticFiles();
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<TelemetryHub>("/hubs/telemetry");

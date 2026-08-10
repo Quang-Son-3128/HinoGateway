@@ -1,0 +1,394 @@
+@page "/alarm-rules"
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+<PageTitle>HinoGateway — Alarm Rules</PageTitle>
+
+<div class="page-head">
+    <h1>Alarm Rules</h1>
+    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Info"
+             Icon="@Icons.Material.Filled.FlashOn">applied instantly</MudChip>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+               StartIcon="@Icons.Material.Filled.AddAlert" OnClick="NewAlarm" Disabled="_busy">
+        New alarm
+    </MudButton>
+</div>
+
+<MudText Typo="Typo.caption" Class="d-block mb-3" Style="opacity:.6">
+    Alarms are evaluated on top of the live tag stream, so a change here takes effect immediately —
+    no "Apply to engine" step and no interruption to data acquisition.
+</MudText>
+
+@if (_editing is not null)
+{
+    <MudPaper Class="pa-4 mb-4" Elevation="0" Outlined Style="border-left:3px solid var(--mud-palette-primary)">
+        <MudText Typo="Typo.subtitle2" Class="mb-3">@(_isNew ? "New alarm" : $"Edit — {_editing.Name}")</MudText>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6" md="3">
+                <MudTextField @bind-Value="_editing.Name" Label="Name" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" Required />
+            </MudItem>
+            <MudItem xs="12" sm="6" md="4">
+                <MudAutocomplete T="TagDto" @bind-Value="_selectedTag" Label="Tag" Variant="Variant.Outlined"
+                                 Margin="Margin.Dense" Dense Clearable SearchFunc="SearchTags" MaxItems="50"
+                                 ToStringFunc="@(t => t?.Path ?? "")" Placeholder="Type to search…" />
+            </MudItem>
+            <MudItem xs="12" sm="6" md="2">
+                <MudSelect T="AlarmCondition" @bind-Value="_editing.Condition" Label="Condition"
+                           Variant="Variant.Outlined" Margin="Margin.Dense" Dense>
+                    @foreach (var c in Enum.GetValues<AlarmCondition>())
+                    {
+                        <MudSelectItem Value="c">@ConditionLabel(c)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudSelect T="AlarmSeverity" @bind-Value="_editing.Severity" Label="Severity"
+                           Variant="Variant.Outlined" Margin="Margin.Dense" Dense>
+                    @foreach (var s in Enum.GetValues<AlarmSeverity>().OrderByDescending(x => x))
+                    {
+                        <MudSelectItem Value="s">@s</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+
+            @if (IsLevel(_editing.Condition))
+            {
+                <MudItem xs="6" sm="3" md="2">
+                    <MudNumericField @bind-Value="_editing.Limit" Label="Limit" Variant="Variant.Outlined"
+                                     Margin="Margin.Dense" Culture="@System.Globalization.CultureInfo.InvariantCulture" />
+                </MudItem>
+                <MudItem xs="6" sm="3" md="2">
+                    <MudNumericField @bind-Value="_editing.Hysteresis" Label="Hysteresis" Min="0"
+                                     Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Culture="@System.Globalization.CultureInfo.InvariantCulture"
+                                     HelperText="clear deadband" />
+                </MudItem>
+            }
+            @if (_editing.Condition == AlarmCondition.Digital)
+            {
+                <MudItem xs="12" sm="6" md="3">
+                    <MudSelect T="bool" @bind-Value="_editing.TriggerOnTrue" Label="Trigger when"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Dense>
+                        <MudSelectItem Value="true">Point is TRUE / ON</MudSelectItem>
+                        <MudSelectItem Value="false">Point is FALSE / OFF</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+            }
+
+            <MudItem xs="6" sm="3" md="2">
+                <MudNumericField @bind-Value="_editing.OnDelayMs" Label="On delay (ms)" Min="0"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="must persist" />
+            </MudItem>
+            <MudItem xs="6" sm="3" md="2">
+                <MudNumericField @bind-Value="_editing.OffDelayMs" Label="Off delay (ms)" Min="0"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="before clearing" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudTextField @bind-Value="_editing.Message" Label="Operator message" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" Placeholder="e.g. Tank 1 level above 90 %" />
+            </MudItem>
+            <MudItem xs="12" md="4" Class="d-flex align-center" Style="gap:1rem">
+                <MudSwitch @bind-Value="_editing.Enabled" Color="Color.Primary" Label="Enabled" />
+                <MudTooltip Text="Keep the alarm in the list after the condition clears, until an operator acknowledges it">
+                    <MudSwitch @bind-Value="_editing.RequiresAck" Color="Color.Primary" Label="Requires ack" />
+                </MudTooltip>
+            </MudItem>
+        </MudGrid>
+
+        @if (_selectedTag is not null)
+        {
+            <MudText Typo="Typo.caption" Class="mono d-block mt-2" Style="opacity:.6">
+                Watching: @_selectedTag.Path @(string.IsNullOrEmpty(_selectedTag.Unit) ? "" : $"[{_selectedTag.Unit}]")
+                — @ExplainCondition()
+            </MudText>
+        }
+
+        <div class="d-flex mt-4" style="gap:.5rem">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                       OnClick="SaveAsync" Disabled="_busy">Save</MudButton>
+            <MudButton Variant="Variant.Text" OnClick="@(() => { _editing = null; _selectedTag = null; })" Disabled="_busy">Cancel</MudButton>
+        </div>
+    </MudPaper>
+}
+
+<MudPaper Elevation="0" Outlined>
+    <MudToolBar Dense Class="px-3" Style="gap:.6rem">
+        <MudIcon Icon="@Icons.Material.Filled.Rule" Size="Size.Small" Style="opacity:.6" />
+        <MudText Typo="Typo.subtitle2">Configured alarms</MudText>
+        <MudText Typo="Typo.caption" Class="mono" Style="opacity:.5">@_alarms.Count</MudText>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="LoadAsync" />
+    </MudToolBar>
+
+    @if (_alarms.Count == 0)
+    {
+        <div class="alarm-empty">
+            <MudIcon Icon="@Icons.Material.Filled.NotificationsOff" Style="opacity:.4;font-size:2rem" />
+            <MudText Typo="Typo.subtitle1">No alarms configured</MudText>
+            <MudText Typo="Typo.caption" Style="opacity:.6">Add one to start supervising a tag.</MudText>
+        </div>
+    }
+    else
+    {
+        <MudTable Items="_alarms" Dense Hover Elevation="0" Breakpoint="Breakpoint.Sm">
+            <HeaderContent>
+                <MudTh Style="width:2.5rem"></MudTh>
+                <MudTh>Name</MudTh>
+                <MudTh>Tag</MudTh>
+                <MudTh>Condition</MudTh>
+                <MudTh Style="text-align:right">Limit</MudTh>
+                <MudTh Style="text-align:right">Hyst.</MudTh>
+                <MudTh Style="text-align:right">Delays</MudTh>
+                <MudTh>Severity</MudTh>
+                <MudTh>Ack</MudTh>
+                <MudTh>Message</MudTh>
+                <MudTh Style="width:7rem"></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <MudTooltip Text="@(context.Enabled ? "Enabled — click to disable" : "Disabled — click to enable")">
+                        <MudIconButton Size="Size.Small"
+                                       Icon="@(context.Enabled ? Icons.Material.Filled.ToggleOn : Icons.Material.Filled.ToggleOff)"
+                                       Color="@(context.Enabled ? Color.Success : Color.Default)"
+                                       OnClick="@(() => ToggleAsync(context))" Disabled="_busy" />
+                    </MudTooltip>
+                </MudTd>
+                <MudTd DataLabel="Name" Style="@(context.Enabled ? "font-weight:600" : "font-weight:600;opacity:.5")">@context.Name</MudTd>
+                <MudTd DataLabel="Tag">
+                    @if (string.IsNullOrEmpty(context.TagPath))
+                    {
+                        <MudTooltip Text="The referenced tag no longer exists — this alarm is not evaluated">
+                            <span class="mono" style="font-size:.8rem;color:var(--hino-bad)">missing tag</span>
+                        </MudTooltip>
+                    }
+                    else
+                    {
+                        <MudLink Href="@($"tags?select={Uri.EscapeDataString(context.TagPath)}")" Class="mono" Style="font-size:.8rem">@context.TagPath</MudLink>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Condition"><span class="mono" style="font-size:.8rem">@ConditionLabel(context.Condition)</span></MudTd>
+                <MudTd DataLabel="Limit" Style="text-align:right">
+                    <span class="mono" style="font-size:.8rem">@(IsLevel(context.Condition) ? context.Limit.ToString("0.###") : "—")</span>
+                </MudTd>
+                <MudTd DataLabel="Hyst." Style="text-align:right">
+                    <span class="mono" style="font-size:.8rem;opacity:.7">@(IsLevel(context.Condition) ? context.Hysteresis.ToString("0.###") : "—")</span>
+                </MudTd>
+                <MudTd DataLabel="Delays" Style="text-align:right">
+                    <span class="mono" style="font-size:.78rem;opacity:.7">@context.OnDelayMs / @context.OffDelayMs</span>
+                </MudTd>
+                <MudTd DataLabel="Severity">
+                    <span class="sev-badge" style="background:@SeverityColor(context.Severity)">@context.Severity.ToString().ToUpperInvariant()</span>
+                </MudTd>
+                <MudTd DataLabel="Ack">
+                    <span class="mono" style="font-size:.75rem;opacity:.7">@(context.RequiresAck ? "required" : "auto")</span>
+                </MudTd>
+                <MudTd DataLabel="Message" Style="opacity:.7;font-size:.85rem">@context.Message</MudTd>
+                <MudTd Style="text-align:right;white-space:nowrap">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => Edit(context))" Disabled="_busy" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => DeleteAsync(context))" Disabled="_busy" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+@code {
+    private List<AlarmDto> _alarms = new();
+    private List<TagDto> _tags = new();
+    private AlarmDto? _editing;
+    private TagDto? _selectedTag;
+    private bool _isNew;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _tags = await Http.GetFromJsonAsync<List<TagDto>>("api/config/tags") ?? new();
+            _alarms = (await Http.GetFromJsonAsync<List<AlarmDto>>("api/alarms") ?? new())
+                .OrderBy(a => a.TagPath, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(a => a.Condition)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("Could not load alarms: " + ex.Message, Severity.Error);
+        }
+        StateHasChanged();
+    }
+
+    private Task<IEnumerable<TagDto>> SearchTags(string value, CancellationToken ct)
+    {
+        IEnumerable<TagDto> q = _tags;
+        if (!string.IsNullOrWhiteSpace(value))
+            q = q.Where(t => t.Path.Contains(value, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(q.OrderBy(t => t.Path, StringComparer.OrdinalIgnoreCase).Take(50));
+    }
+
+    private void NewAlarm()
+    {
+        _isNew = true;
+        _selectedTag = null;
+        _editing = new AlarmDto
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = "",
+            Condition = AlarmCondition.Hi,
+            Severity = AlarmSeverity.Warning,
+            Enabled = true,
+            RequiresAck = true,
+            TriggerOnTrue = true,
+        };
+    }
+
+    private void Edit(AlarmDto alarm)
+    {
+        _isNew = false;
+        // Edit a copy so cancelling leaves the table untouched.
+        _editing = new AlarmDto
+        {
+            Id = alarm.Id,
+            Name = alarm.Name,
+            TagId = alarm.TagId,
+            TagPath = alarm.TagPath,
+            Condition = alarm.Condition,
+            Limit = alarm.Limit,
+            Hysteresis = alarm.Hysteresis,
+            OnDelayMs = alarm.OnDelayMs,
+            OffDelayMs = alarm.OffDelayMs,
+            Severity = alarm.Severity,
+            Message = alarm.Message,
+            Enabled = alarm.Enabled,
+            RequiresAck = alarm.RequiresAck,
+            TriggerOnTrue = alarm.TriggerOnTrue,
+        };
+        _selectedTag = _tags.FirstOrDefault(t => t.Id == alarm.TagId);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_editing is null)
+            return;
+        if (string.IsNullOrWhiteSpace(_editing.Name))
+        {
+            Snackbar.Add("A name is required.", Severity.Warning);
+            return;
+        }
+        if (_selectedTag is null)
+        {
+            Snackbar.Add("Pick the tag this alarm watches.", Severity.Warning);
+            return;
+        }
+
+        _editing.TagId = _selectedTag.Id;
+        await PutAsync(_editing, $"Saved '{_editing.Name}'");
+    }
+
+    private Task ToggleAsync(AlarmDto alarm)
+    {
+        alarm.Enabled = !alarm.Enabled;
+        return PutAsync(alarm, alarm.Enabled ? $"'{alarm.Name}' enabled" : $"'{alarm.Name}' disabled");
+    }
+
+    private async Task PutAsync(AlarmDto alarm, string okMessage)
+    {
+        _busy = true;
+        try
+        {
+            var resp = await Http.PutAsJsonAsync($"api/alarms/{alarm.Id}", alarm);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add(okMessage, Severity.Success);
+                _editing = null;
+                _selectedTag = null;
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add($"Save failed: {await resp.Content.ReadAsStringAsync()}", Severity.Error);
+                await LoadAsync(); // undo an optimistic toggle
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("Error: " + ex.Message, Severity.Error);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteAsync(AlarmDto alarm)
+    {
+        var confirm = await Dialogs.ShowMessageBoxAsync(
+            "Delete alarm",
+            $"Delete '{alarm.Name}'? Its journal history is kept.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (confirm != true)
+            return;
+
+        _busy = true;
+        try
+        {
+            var resp = await Http.DeleteAsync($"api/alarms/{alarm.Id}");
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"Deleted '{alarm.Name}'", Severity.Success);
+                if (_editing?.Id == alarm.Id) { _editing = null; _selectedTag = null; }
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add($"Delete failed: {await resp.Content.ReadAsStringAsync()}", Severity.Error);
+            }
+        }
+        finally { _busy = false; }
+    }
+
+    private string ExplainCondition()
+    {
+        if (_editing is null)
+            return "";
+        var unit = string.IsNullOrEmpty(_selectedTag?.Unit) ? "" : " " + _selectedTag!.Unit;
+        var limit = _editing.Limit.ToString("0.###");
+        var clear = _editing.Hysteresis > 0
+            ? _editing.Condition is AlarmCondition.Lo or AlarmCondition.LoLo
+                ? $", clears above {(_editing.Limit + _editing.Hysteresis):0.###}{unit}"
+                : $", clears below {(_editing.Limit - _editing.Hysteresis):0.###}{unit}"
+            : "";
+        return _editing.Condition switch
+        {
+            AlarmCondition.Hi or AlarmCondition.HiHi => $"activates at ≥ {limit}{unit}{clear}",
+            AlarmCondition.Lo or AlarmCondition.LoLo => $"activates at ≤ {limit}{unit}{clear}",
+            AlarmCondition.Digital => $"activates when the point is {(_editing.TriggerOnTrue ? "TRUE" : "FALSE")}",
+            _ => "activates when the tag's quality is not Good (comms loss, decode error)",
+        };
+    }
+
+    private static bool IsLevel(AlarmCondition c) =>
+        c is AlarmCondition.Hi or AlarmCondition.HiHi or AlarmCondition.Lo or AlarmCondition.LoLo;
+
+    private static string ConditionLabel(AlarmCondition c) => c switch
+    {
+        AlarmCondition.Hi => "HI (≥ limit)",
+        AlarmCondition.HiHi => "HIHI (≥ limit)",
+        AlarmCondition.Lo => "LO (≤ limit)",
+        AlarmCondition.LoLo => "LOLO (≤ limit)",
+        AlarmCondition.Digital => "DIGITAL (on/off)",
+        _ => "BAD QUALITY",
+    };
+
+    private static string SeverityColor(AlarmSeverity s) => s switch
+    {
+        AlarmSeverity.Critical => "#dc2626",
+        AlarmSeverity.Major => "#ea580c",
+        AlarmSeverity.Minor => "#d97706",
+        AlarmSeverity.Warning => "#ca8a04",
+        _ => "#0284c7",
+    };
+}

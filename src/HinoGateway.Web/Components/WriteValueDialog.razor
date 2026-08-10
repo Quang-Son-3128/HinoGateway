@@ -1,0 +1,115 @@
+@using System.Net.Http.Json
+@inject HttpClient Http
+
+@* Control action: sends a value down to the device. Kept in a dialog so it is one click away from
+   any tag row, and so the tag being written is impossible to mistake. *@
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center" style="gap:.5rem">
+            <MudIcon Icon="@Icons.Material.Filled.Output" Size="Size.Small" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">Write value</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudSimpleTable Dense Elevation="0" Style="background:transparent">
+            <tbody>
+                <tr>
+                    <td style="opacity:.6">Tag</td>
+                    <td class="mono">@TagId</td>
+                </tr>
+                @if (!string.IsNullOrEmpty(Name))
+                {
+                    <tr>
+                        <td style="opacity:.6">Name</td>
+                        <td>@Name</td>
+                    </tr>
+                }
+                <tr>
+                    <td style="opacity:.6">Current</td>
+                    <td class="mono">@(string.IsNullOrEmpty(CurrentValue) ? "—" : CurrentValue) @Unit</td>
+                </tr>
+            </tbody>
+        </MudSimpleTable>
+
+        <MudTextField T="string" @bind-Value="_value" Label="New value" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" Class="mono mt-4" Immediate AutoFocus
+                      Placeholder="e.g. 1234 or true"
+                      HelperText="Numbers, true/false, or text — the driver converts to the tag's type."
+                      OnKeyDown="OnKeyDown" />
+
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense Class="mt-3">@_error</MudAlert>
+        }
+
+        <MudText Typo="Typo.caption" Class="d-block mt-3" Style="opacity:.6">
+            This writes to the physical device (holding register / coil). Read-only points are rejected.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_busy">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send"
+                   OnClick="WriteAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_value))">
+            Write
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+
+    [Parameter] public string TagId { get; set; } = "";
+    [Parameter] public string? Name { get; set; }
+    [Parameter] public string? Unit { get; set; }
+    [Parameter] public string? CurrentValue { get; set; }
+
+    private string _value = "";
+    private string? _error;
+    private bool _busy;
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_busy && !string.IsNullOrWhiteSpace(_value))
+            await WriteAsync();
+    }
+
+    private async Task WriteAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            // The tag id travels in the body: runtime ids are folder paths and the '/' they contain
+            // cannot survive a route segment.
+            var resp = await Http.PostAsJsonAsync("api/tags/write",
+                new { tagId = TagId, value = Parse(_value) });
+
+            if (resp.IsSuccessStatusCode)
+                Dialog.Close(DialogResult.Ok($"{_value} → {TagId}"));
+            else
+                _error = $"{(int)resp.StatusCode}: {await resp.Content.ReadAsStringAsync()}";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Cancel() => Dialog.Cancel();
+
+    private static object Parse(string raw)
+    {
+        raw = raw.Trim();
+        if (bool.TryParse(raw, out var b))
+            return b;
+        if (double.TryParse(raw, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var d))
+            return d;
+        return raw;
+    }
+}

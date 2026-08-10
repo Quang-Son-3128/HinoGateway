@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="lib60870.NET" Version="2.3.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HinoGateway.Core\HinoGateway.Core.csproj" />
+    <ProjectReference Include="..\..\src\HinoGateway.Engine\HinoGateway.Engine.csproj" />
+    <ProjectReference Include="..\..\src\HinoGateway.Drivers.Simulator\HinoGateway.Drivers.Simulator.csproj" />
+    <ProjectReference Include="..\..\src\HinoGateway.Drivers.Modbus\HinoGateway.Drivers.Modbus.csproj" />
+    <ProjectReference Include="..\..\src\HinoGateway.Storage\HinoGateway.Storage.csproj" />
+    <ProjectReference Include="..\..\src\HinoGateway.Northbound.Iec104\HinoGateway.Northbound.Iec104.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,391 @@
+@page "/iec104"
+@using System.Net.Http.Json
+@using System.Text
+@implements IDisposable
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+@inject NavigationManager Nav
+
+<PageTitle>HinoGateway — IEC-104</PageTitle>
+
+<div class="page-head">
+    <h1>IEC 60870-5-104</h1>
+    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+             Color="@(_status.Running ? Color.Success : _status.Enabled ? Color.Error : Color.Default)"
+             Icon="@(_status.Running ? Icons.Material.Filled.CloudDone : Icons.Material.Filled.CloudOff)">
+        @(_status.Running ? "LISTENING" : _status.Enabled ? "STOPPED" : "DISABLED")
+    </MudChip>
+    <MudSpacer />
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Save"
+               OnClick="SaveAsync" Disabled="_busy">Save</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+               StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ApplyAsync" Disabled="_busy">
+        Save &amp; restart link
+    </MudButton>
+</div>
+
+<MudText Typo="Typo.caption" Class="d-block mb-3" Style="opacity:.6">
+    The gateway acts as a <b>controlled station</b>: the control centre connects in, interrogates it,
+    receives changes and may send commands. Commands go through the same validation and scaling as any
+    other write, so a setpoint from the dispatcher lands on the device exactly as one typed locally would.
+</MudText>
+
+@if (_status.LastError is not null)
+{
+    <MudAlert Severity="Severity.Error" Dense Class="mb-3">@_status.LastError</MudAlert>
+}
+
+@if (_status.Warning is not null)
+{
+    <MudAlert Severity="Severity.Warning" Dense Class="mb-3">@_status.Warning</MudAlert>
+}
+
+<div class="kpi-row mb-4">
+    <div class="kpi @(_status.Running ? "kpi-good" : "kpi-neutral")">
+        <div class="kpi-label">Endpoint</div>
+        <div class="kpi-value" style="font-size:1rem">@_status.Endpoint</div>
+        <div class="kpi-sub">CA @_status.CommonAddress · @_status.MappedPoints point(s)</div>
+    </div>
+    <div class="kpi @(_status.OpenConnections > 0 ? "kpi-good" : "kpi-warn")">
+        <div class="kpi-label">Control centres</div>
+        <div class="kpi-value">@_status.OpenConnections</div>
+        <div class="kpi-sub">@(_status.Connections.Count == 0 ? "none connected" : string.Join(", ", _status.Connections.Select(c => c.RemoteAddress)))</div>
+    </div>
+    <div class="kpi kpi-accent">
+        <div class="kpi-label">ASDUs sent</div>
+        <div class="kpi-value">@_status.AsdusSent</div>
+        <div class="kpi-sub">@_status.SpontaneousSent spontaneous · last @Ago(_status.LastSentAt)</div>
+    </div>
+    <div class="kpi kpi-accent">
+        <div class="kpi-label">ASDUs received</div>
+        <div class="kpi-value">@_status.AsdusReceived</div>
+        <div class="kpi-sub">@_status.InterrogationsServed interrogation(s) · last @Ago(_status.LastReceivedAt)</div>
+    </div>
+    <div class="kpi @(_status.CommandsRejected > 0 ? "kpi-bad" : "kpi-neutral")">
+        <div class="kpi-label">Commands</div>
+        <div class="kpi-value">@_status.CommandsAccepted<span style="opacity:.45;font-size:.7em"> ok</span></div>
+        <div class="kpi-sub">@_status.CommandsRejected refused</div>
+    </div>
+    @if (_status.DroppedUpdates > 0)
+    {
+        <div class="kpi kpi-bad">
+            <div class="kpi-label">Dropped updates</div>
+            <div class="kpi-value">@_status.DroppedUpdates</div>
+            <div class="kpi-sub">link cannot keep up</div>
+        </div>
+    }
+</div>
+
+@if (_status.LastClockOffsetSeconds is { } offset)
+{
+    <MudAlert Severity="@(Math.Abs(offset) > 5 ? Severity.Warning : Severity.Info)" Dense Class="mb-3">
+        The control centre last set its clock @offset.ToString("0.###") s away from ours.
+        The gateway records the offset but does not move the machine clock — keep NTP running on this machine.
+    </MudAlert>
+}
+
+<MudPaper Class="pa-4 mb-4" Elevation="0" Outlined>
+    <MudGrid Spacing="2">
+        <MudItem xs="12" sm="4" md="2">
+            <MudSwitch @bind-Value="_options.Enabled" Color="Color.Primary" Label="Enabled" />
+        </MudItem>
+        <MudItem xs="12" sm="4" md="3">
+            <MudTextField @bind-Value="_options.BindAddress" Label="Bind address" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" HelperText="0.0.0.0 = every interface" />
+        </MudItem>
+        <MudItem xs="6" sm="4" md="2">
+            <MudNumericField @bind-Value="_options.Port" Label="Port" Min="1" Max="65535"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" sm="4" md="2">
+            <MudNumericField @bind-Value="_options.CommonAddress" Label="Common address (CA)" Min="1" Max="65534"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="assigned by the utility" />
+        </MudItem>
+        <MudItem xs="6" sm="4" md="3">
+            <MudNumericField @bind-Value="_options.MaxConnections" Label="Max control centres" Min="1" Max="32"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="redundant links" />
+        </MudItem>
+
+        <MudItem xs="12" md="3" Class="d-flex align-center" style="gap:1rem">
+            <MudSwitch @bind-Value="_options.AllowCommands" Color="Color.Primary" Label="Accept commands" />
+        </MudItem>
+        <MudItem xs="12" md="3" Class="d-flex align-center" style="gap:1rem">
+            <MudSwitch @bind-Value="_options.AllowClockSync" Color="Color.Primary" Label="Accept clock sync" />
+        </MudItem>
+        <MudItem xs="12" md="3" Class="d-flex align-center" style="gap:1rem">
+            <MudTooltip Text="IEC-104 leaves this to agreement with the control centre">
+                <MudSwitch @bind-Value="_options.TimestampsInUtc" Color="Color.Primary" Label="Timestamps in UTC" />
+            </MudTooltip>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudNumericField @bind-Value="_options.PeriodicIntervalSeconds" Label="Periodic transmission (s)" Min="0"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="0 = report by exception" />
+        </MudItem>
+    </MudGrid>
+
+    <MudExpansionPanels Elevation="0" Class="mt-3">
+        <MudExpansionPanel Text="APCI parameters (k, w, t0–t3)">
+            <MudGrid Spacing="2">
+                <MudItem xs="4" md="2"><MudNumericField @bind-Value="_options.K" Label="k" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                <MudItem xs="4" md="2"><MudNumericField @bind-Value="_options.W" Label="w" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                <MudItem xs="4" md="2"><MudNumericField @bind-Value="_options.T0" Label="t0 (s)" Min="1" Max="255" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                <MudItem xs="4" md="2"><MudNumericField @bind-Value="_options.T1" Label="t1 (s)" Min="1" Max="255" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                <MudItem xs="4" md="2"><MudNumericField @bind-Value="_options.T2" Label="t2 (s)" Min="1" Max="255" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                <MudItem xs="4" md="2"><MudNumericField @bind-Value="_options.T3" Label="t3 (s)" Min="1" Max="255" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            </MudGrid>
+            <MudText Typo="Typo.caption" Style="opacity:.6">t2 must be shorter than t1. Leave these alone unless the utility specifies otherwise.</MudText>
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+</MudPaper>
+
+<MudPaper Elevation="0" Outlined>
+    <MudToolBar Dense Class="px-3" Style="gap:.6rem">
+        <MudIcon Icon="@Icons.Material.Filled.FormatListNumbered" Size="Size.Small" Style="opacity:.6" />
+        <MudText Typo="Typo.subtitle2">Signal list</MudText>
+        <MudText Typo="Typo.caption" Class="mono" Style="opacity:.5">@_options.Points.Count</MudText>
+        <MudSpacer />
+        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddPoint" Disabled="_busy">Add point</MudButton>
+        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
+                   OnClick="@(() => Nav.NavigateTo("api/iec104/points/csv", forceLoad: true))">Export CSV</MudButton>
+        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Upload" HtmlTag="label" for="iec104Csv">Import CSV</MudButton>
+        <InputFile id="iec104Csv" OnChange="ImportCsvAsync" style="display:none" accept=".csv,text/csv" />
+    </MudToolBar>
+
+    @if (_options.Points.Count == 0)
+    {
+        <div class="alarm-empty">
+            <MudIcon Icon="@Icons.Material.Filled.FormatListNumbered" Style="opacity:.4;font-size:2rem" />
+            <MudText Typo="Typo.subtitle1">No points mapped</MudText>
+            <MudText Typo="Typo.caption" Style="opacity:.6">
+                Add them here, or import the utility's signal list as CSV
+                (<span class="mono">TagPath,Ioa,Type,Deadband,WithTimestamp,Command,ReportScale</span>).
+                Type and Command accept the utility's numbers — <span class="mono">T13</span>,
+                <span class="mono">T50</span> — as well as <span class="mono">M_ME_NC_1</span> style names.
+            </MudText>
+        </div>
+    }
+    else
+    {
+        <MudTable Items="_options.Points" Dense Hover Elevation="0" Breakpoint="Breakpoint.Sm"
+                  Virtualize FixedHeader Height="@(_options.Points.Count > 15 ? "50vh" : null)">
+            <HeaderContent>
+                <MudTh Style="width:7rem">IOA</MudTh>
+                <MudTh>Tag</MudTh>
+                <MudTh Style="width:11rem">Type</MudTh>
+                <MudTh Style="width:8rem">Deadband</MudTh>
+                <MudTh Style="width:8rem">Scale</MudTh>
+                <MudTh Style="width:6rem">Time tag</MudTh>
+                <MudTh Style="width:12rem">Command</MudTh>
+                <MudTh Style="width:3rem"></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="IOA">
+                    <MudNumericField T="int" Value="context.Ioa" ValueChanged="@(v => context.Ioa = v)"
+                                     Min="1" Variant="Variant.Text" Margin="Margin.Dense" HideSpinButtons Class="mono" />
+                </MudTd>
+                <MudTd DataLabel="Tag">
+                    <MudAutocomplete T="TagDto" Value="TagOf(context)" ValueChanged="@(t => SetTag(context, t))"
+                                     SearchFunc="SearchTags" MaxItems="50" Dense Variant="Variant.Text"
+                                     Margin="Margin.Dense" ToStringFunc="@(t => t?.Path ?? "")"
+                                     Placeholder="type to search…" />
+                </MudTd>
+                <MudTd DataLabel="Type">
+                    <MudSelect T="Iec104PointType" Value="context.Type" ValueChanged="@(v => context.Type = v)"
+                               Dense Variant="Variant.Text" Margin="Margin.Dense" Class="mono">
+                        @foreach (var t in Enum.GetValues<Iec104PointType>())
+                        {
+                            <MudSelectItem Value="t">@Iec104TypeIds.Label(t, context.WithTimestamp)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudTd>
+                <MudTd DataLabel="Deadband">
+                    <MudNumericField T="double" Value="context.Deadband" ValueChanged="@(v => context.Deadband = v)"
+                                     Min="0" Variant="Variant.Text" Margin="Margin.Dense" HideSpinButtons Class="mono"
+                                     Culture="@System.Globalization.CultureInfo.InvariantCulture" />
+                </MudTd>
+                <MudTd DataLabel="Scale">
+                    <MudNumericField T="double" Value="context.ReportScale" ValueChanged="@(v => context.ReportScale = v)"
+                                     Variant="Variant.Text" Margin="Margin.Dense" HideSpinButtons Class="mono"
+                                     Culture="@System.Globalization.CultureInfo.InvariantCulture" />
+                </MudTd>
+                <MudTd DataLabel="Time tag">
+                    @* The time tag changes the type identification (T13 without, T36 with), so what
+                       actually goes on the wire is spelled out next to the switch. *@
+                    <div class="d-flex align-center" style="gap:.35rem">
+                        <MudSwitch T="bool" Value="context.WithTimestamp" ValueChanged="@(v => context.WithTimestamp = v)"
+                                   Color="Color.Primary" Size="Size.Small" />
+                        <span class="mono" style="font-size:.72rem;opacity:.65">
+                            T@(Iec104TypeIds.Number(context.Type, context.WithTimestamp))
+                        </span>
+                    </div>
+                </MudTd>
+                <MudTd DataLabel="Command">
+                    <MudSelect T="Iec104CommandType" Value="context.Command" ValueChanged="@(v => context.Command = v)"
+                               Dense Variant="Variant.Text" Margin="Margin.Dense" Class="mono">
+                        @foreach (var c in Enum.GetValues<Iec104CommandType>())
+                        {
+                            <MudSelectItem Value="c">@Iec104TypeIds.Label(c)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => _options.Points.Remove(context))" Disabled="_busy" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+@code {
+    private Iec104ServerOptions _options = new();
+    private Iec104Status _status = Empty;
+    private List<TagDto> _tags = new();
+    private System.Threading.Timer? _statusTimer;
+    private bool _busy;
+
+    private static readonly Iec104Status Empty = new(false, false, "-", 0, 0, 0,
+        Array.Empty<Iec104ConnectionInfo>(), 0, 0, null, null, 0, 0, 0, 0, 0, null, null, null);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _statusTimer = new System.Threading.Timer(_ => InvokeAsync(RefreshStatusAsync), null, 0, 3000);
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _tags = await Http.GetFromJsonAsync<List<TagDto>>("api/config/tags") ?? new();
+            _options = await Http.GetFromJsonAsync<Iec104ServerOptions>("api/iec104") ?? new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("Could not load the IEC-104 configuration: " + ex.Message, Severity.Error);
+        }
+        StateHasChanged();
+    }
+
+    private async Task RefreshStatusAsync()
+    {
+        try
+        {
+            _status = await Http.GetFromJsonAsync<Iec104Status>("api/iec104/status") ?? Empty;
+            StateHasChanged();
+        }
+        catch { /* server briefly unreachable — keep the last known status */ }
+    }
+
+    private TagDto? TagOf(Iec104PointDto point) => _tags.FirstOrDefault(t => t.Id == point.TagId);
+
+    private void SetTag(Iec104PointDto point, TagDto? tag)
+    {
+        point.TagId = tag?.Id ?? "";
+        point.TagPath = tag?.Path ?? "";
+    }
+
+    private Task<IEnumerable<TagDto>> SearchTags(string value, CancellationToken ct)
+    {
+        IEnumerable<TagDto> q = _tags;
+        if (!string.IsNullOrWhiteSpace(value))
+            q = q.Where(t => t.Path.Contains(value, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(q.OrderBy(t => t.Path, StringComparer.OrdinalIgnoreCase).Take(50));
+    }
+
+    private void AddPoint()
+    {
+        var nextIoa = _options.Points.Count == 0 ? 1001 : _options.Points.Max(p => p.Ioa) + 1;
+        _options.Points.Add(new Iec104PointDto { Ioa = nextIoa, Type = Iec104PointType.ShortFloat });
+    }
+
+    private async Task<bool> SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            var resp = await Http.PutAsJsonAsync("api/iec104", _options);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Saved", Severity.Success);
+                return true;
+            }
+
+            Snackbar.Add(await resp.Content.ReadAsStringAsync(), Severity.Error);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("Error: " + ex.Message, Severity.Error);
+            return false;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ApplyAsync()
+    {
+        if (!await SaveAsync())
+            return;
+
+        _busy = true;
+        try
+        {
+            var resp = await Http.PostAsync("api/iec104/apply", null);
+            if (resp.IsSuccessStatusCode)
+            {
+                _status = await resp.Content.ReadFromJsonAsync<Iec104Status>() ?? Empty;
+                Snackbar.Add(_status.Running
+                    ? $"Listening on {_status.Endpoint}"
+                    : _status.Enabled ? $"Could not start: {_status.LastError}" : "Link disabled",
+                    _status.Running || !_status.Enabled ? Severity.Success : Severity.Error);
+            }
+            else
+            {
+                Snackbar.Add(await resp.Content.ReadAsStringAsync(), Severity.Error);
+            }
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ImportCsvAsync(InputFileChangeEventArgs e)
+    {
+        _busy = true;
+        try
+        {
+            using var reader = new StreamReader(e.File.OpenReadStream(8 * 1024 * 1024));
+            var csv = await reader.ReadToEndAsync();
+            var resp = await Http.PostAsJsonAsync("api/iec104/points/csv", new { csv });
+            if (resp.IsSuccessStatusCode)
+            {
+                var result = await resp.Content.ReadFromJsonAsync<CsvImportResult>();
+                Snackbar.Add($"Imported {result?.Points ?? 0} point(s) — press \"Save & restart link\" to apply.", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add($"Import failed: {await resp.Content.ReadAsStringAsync()}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("Error: " + ex.Message, Severity.Error);
+        }
+        finally { _busy = false; }
+    }
+
+    private sealed record CsvImportResult(int Points);
+
+    private static string Ago(DateTimeOffset? at)
+    {
+        if (at is null)
+            return "never";
+        var span = DateTimeOffset.UtcNow - at.Value;
+        if (span < TimeSpan.FromSeconds(2)) return "just now";
+        if (span < TimeSpan.FromMinutes(1)) return $"{(int)span.TotalSeconds}s ago";
+        if (span < TimeSpan.FromHours(1)) return $"{(int)span.TotalMinutes}m ago";
+        return $"{(int)span.TotalHours}h ago";
+    }
+
+    public void Dispose() => _statusTimer?.Dispose();
+}

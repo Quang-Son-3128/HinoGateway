@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="lib60870.NET" Version="2.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HinoGateway.Core\HinoGateway.Core.csproj" />
+    <ProjectReference Include="..\HinoGateway.Engine\HinoGateway.Engine.csproj" />
+  </ItemGroup>
+
+</Project>

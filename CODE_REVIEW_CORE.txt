@@ -1,0 +1,330 @@
+HINOGATEWAY - REVIEW PHAN LOI
+Ngay review: 2026-07-30
+Pham vi: Cau truc du an, core runtime, driver, storage, server va luong truyen du lieu.
+Khong danh gia UI/UX trong giai doan nay.
+
+======================================================================
+1. KET LUAN TONG QUAT
+======================================================================
+
+Nen mong hien tai tot cho mot POC:
+
+- Phan lop Core / Engine / Drivers / Storage / Server / Web ro rang.
+- Driver abstraction nho gon, de mo rong them protocol.
+- Moi thiet bi co worker rieng, giup co lap loi.
+- Du lieu co Quality, SourceTimestamp va LastChanged.
+- Co reconnect, exponential backoff va bounded update channel.
+- SQLite/EF Core phu hop voi mot gateway embedded.
+
+Tuy nhien, neu muc tieu la mot gateway cong nghiep chay lau dai tuong tu
+Kepware, phan loi chua du an toan de dua vao production. Bon van de can uu
+tien la:
+
+1. Race condition khi reload runtime.
+2. Reload khong atomic va khong rollback khi config/driver bi loi.
+3. Thuat toan gom block Modbus doc ca cac khoang dia chi khong can thiet.
+4. Chua co kien truc northbound/uplink de gui du lieu toi server trung tam.
+
+======================================================================
+2. CAC PHAT HIEN QUAN TRONG
+======================================================================
+
+2.1. CRITICAL - Reload cau hinh co race condition voi API runtime
+--------------------------------------------------------------------
+
+DeviceEngine.ReloadAsync() xoa va ghi lai _workers cung _workersByTag,
+trong khi cac API khac co the dong thoi:
+
+- Enumerate _workers de lay health.
+- Doc _workersByTag de route lenh write.
+
+Hai collection nay la List va Dictionary thong thuong. _reloadLock chi bao
+ve thao tac reload, khong bao ve cac reader. Ket qua co the la:
+
+- InvalidOperationException khi enumerate.
+- Lookup khong nhat quan trong luc reload.
+- Lenh write tam thoi khong tim thay tag.
+- Runtime quan sat thay trang thai dang duoc xay dung do dang.
+
+File lien quan:
+
+- src/HinoGateway.Engine/DeviceEngine.cs, dong 16-19
+- src/HinoGateway.Engine/DeviceEngine.cs, dong 31-32
+- src/HinoGateway.Engine/DeviceEngine.cs, dong 61-65
+- src/HinoGateway.Engine/DeviceEngine.cs, dong 80-93
+
+Khuyen nghi:
+
+- Xay dung mot immutable runtime snapshot moi hoan chinh.
+- Validate snapshot moi truoc khi kich hoat.
+- Atomic swap snapshot cu va moi.
+- Chi dispose worker cu sau khi snapshot moi da san sang.
+
+
+2.2. HIGH - Reload co the lam mat toan bo runtime khi mot config sai
+--------------------------------------------------------------------
+
+Luong hien tai la:
+
+1. Dung tat ca worker cu.
+2. Tao driver va worker moi.
+3. Start lai tat ca worker.
+
+Driver constructor co the throw, vi du khi dia chi Modbus sai. Neu mot thiet
+bi o giua danh sach bi loi, runtime cu da bi dung va runtime moi chi duoc tao
+mot phan. Khong co validation phase hoac rollback.
+
+File lien quan:
+
+- src/HinoGateway.Engine/DeviceEngine.cs, dong 52-56
+- src/HinoGateway.Engine/DeviceEngine.cs, dong 85-88
+- src/HinoGateway.Drivers.Modbus/ModbusTcpDriver.cs, dong 41-43
+
+Khuyen nghi:
+
+- Moi driver factory cung cap ValidateConfig().
+- Tao thu toan bo driver/worker moi truoc khi dung runtime cu.
+- Chi swap khi tat ca config hop le.
+- Neu reload that bai, tiep tuc giu runtime cu.
+- Tra ve danh sach loi chi tiet theo device/tag cho API va UI.
+
+
+2.3. HIGH - Thuat toan gom block Modbus doc khoang trong rat lon
+--------------------------------------------------------------------
+
+Driver dang lay dia chi nho nhat toi dia chi lon nhat cua moi register bank,
+sau do doc lien tuc va chia thanh cac chunk 125 register hoac 2000 bit.
+
+Vi du: chi co HR:0 va HR:10000, gateway van phai gui khoang 81 request de doc
+toan bo khoang dia chi o giua.
+
+Neu mot khoang khong duoc thiet bi ho tro va tra Illegal Data Address, toan bo
+bank bi danh Bad, ke ca cac tag hop le. Dieu nay khong phu hop voi muc tieu
+"mot point sai khong keo ca device/bank thanh Bad".
+
+File lien quan:
+
+- src/HinoGateway.Drivers.Modbus/ModbusTcpDriver.cs, dong 69-76
+- src/HinoGateway.Drivers.Modbus/ModbusTcpDriver.cs, dong 172-193
+- src/HinoGateway.Drivers.Modbus/ModbusTcpDriver.cs, dong 196-217
+
+Khuyen nghi tao read plan khi khoi tao driver:
+
+- Sort point theo dia chi.
+- Merge cac point lien nhau hoac co khoang trong nho hon nguong cau hinh.
+- Khong vuot protocol limit.
+- Khi mot block bi illegal-address, co the chia doi block de co lap point loi.
+- Luu metrics theo tung block: latency, timeout, retry va exception code.
+
+
+2.4. HIGH - Chua co northbound/uplink thuc su
+--------------------------------------------------------------------
+
+SignalR hien tai chi phuc vu browser. Chua co abstraction rieng de truyen du
+lieu toi server trung tam, vi du:
+
+- MQTT, HTTP, gRPC hoac OPC UA publisher.
+- Retry va exponential backoff doc lap.
+- Store-and-forward khi mat mang.
+- Batch, compression va sequencing.
+- Delivery acknowledgement.
+- Disk queue va gioi han dung luong.
+- Nhan command/config tu server voi xac thuc.
+
+TagStore.Updates la mot single-reader channel. Neu them uploader doc truc tiep
+channel nay, uploader va SignalR co the canh tranh nhau va moi ben chi nhan
+mot phan du lieu.
+
+File lien quan:
+
+- src/HinoGateway.Engine/TagStore.cs, dong 30 tro di
+- src/HinoGateway.Server/Services/TelemetryBroadcaster.cs, dong 27-38
+
+Kien truc de xuat:
+
+Drivers -> Device Workers -> Tag Processing -> Latest-value Store
+                                         |-> Alarm Engine
+                                         |-> UI Realtime
+                                         |-> Historian
+                                         `-> Northbound Publisher
+                                               -> Persistent Disk Spool
+                                               -> Central Server
+
+Nen tach latest-state store va event distribution. Moi consumer can co queue,
+backpressure va delivery policy rieng.
+
+======================================================================
+3. CAC VAN DE DANG LUU Y KHAC
+======================================================================
+
+3.1. Write khong dao scaling
+--------------------------------------------------------------------
+
+Read dang dung cong thuc:
+
+    engineering = raw * scale + offset
+
+Nhung khi write, gia tri engineering duoc chuyen thang xuong driver. Vi du
+scale = 0.1, operator write 50.0 thi PLC nhan raw 50 thay vi raw 500.
+
+File lien quan:
+
+- src/HinoGateway.Core/Scaling.cs, dong 12-21
+- src/HinoGateway.Engine/DeviceWorker.cs, dong 94-109
+
+Can bo sung inverse scaling:
+
+    raw = (engineering - offset) / scale
+
+Dong thoi can kiem tra scale bang 0, range, overflow, precision va kieu du lieu
+truoc khi gui lenh xuong thiet bi.
+
+
+3.2. Endpoint dieu khien thiet bi chua co bao mat
+--------------------------------------------------------------------
+
+Server chua cau hinh authentication/authorization trong khi API write co the
+tac dong truc tiep toi PLC.
+
+File lien quan:
+
+- src/HinoGateway.Server/Program.cs
+- src/HinoGateway.Server/Controllers/TagsController.cs, dong 47-70
+
+Voi gateway cong nghiep, can toi thieu:
+
+- Authentication.
+- Role viewer/operator/admin.
+- Write permission theo tag hoac khu vuc.
+- TLS.
+- Audit log cho moi write va config change.
+- Command correlation ID va timeout.
+- Rate limiting.
+- Phan biet loi validation, conflict, unavailable va timeout o HTTP response.
+
+
+3.3. Import project khong transactional
+--------------------------------------------------------------------
+
+Import dang xoa du lieu hien tai va insert lai bang nhieu SaveChangesAsync
+doc lap. Neu mot thao tac that bai giua chung, cau hinh co the bi mat mot phan.
+
+File lien quan:
+
+- src/HinoGateway.Server/Controllers/ConfigController.cs, dong 319-336
+
+Khuyen nghi:
+
+- Parse va validate toan bo project truoc khi thay doi database.
+- Thuc hien replace trong mot database transaction.
+- Backup/snapshot cau hinh cu truoc khi import.
+- Chi reload engine sau khi transaction commit thanh cong.
+
+
+3.4. Mo hinh Modbus con thieu kha nang thuc te
+--------------------------------------------------------------------
+
+Nhung kha nang nen bo sung:
+
+- UInt16, UInt32 va UInt64.
+- Bit trong holding/input register.
+- Byte swap rieng voi word swap.
+- String length va encoding.
+- Unit ID theo tag neu can gateway/bridge.
+- Multiple scan groups.
+- Deadband va report-by-exception.
+- Modbus RTU serial transport.
+- Metrics request, timeout, retry, bytes va latency theo block.
+
+DataType.String hien dang am tham duoc decode nhu mot ushort. Ket qua co the
+sai nhung van mang Quality.Good.
+
+File lien quan:
+
+- src/HinoGateway.Drivers.Modbus/ModbusCodec.cs, dong 28-30
+
+
+3.5. Cancellation cua NModbus chua thuc su end-to-end
+--------------------------------------------------------------------
+
+Connect co timeout va cancellation, nhung cac lenh read/write NModbus khong
+nhan CancellationToken. Shutdown/reload phai cho read/write timeout xong.
+
+ReadTimeout giup gioi han thoi gian cho, nhung nen kiem tra ky hanh vi khi:
+
+- Socket bi treo.
+- Nhieu retry.
+- Nhieu block trong mot poll.
+- Reload hoac shutdown dang dien ra.
+
+
+3.6. Test coverage chua bao phu cac tinh huong production
+--------------------------------------------------------------------
+
+Tests hien tai da bao phu codec, scaling, TagStore, alarm va fault isolation co
+ban. Nen bo sung:
+
+- Concurrent write trong luc reload.
+- Concurrent health query trong luc reload.
+- Reload voi mot driver/config loi va xac minh runtime cu van chay.
+- Duplicate runtime tag ID.
+- Sparse Modbus addresses.
+- Illegal address chi lam Bad block/tag lien quan.
+- Socket timeout va reconnect.
+- Shutdown trong luc driver dang I/O.
+- Inverse scaling va overflow khi write.
+- Northbound disconnect/reconnect va store-and-forward.
+- Crash/restart trong luc disk spool con du lieu.
+
+======================================================================
+4. NHUNG PHAN DANG LAM TOT
+======================================================================
+
+- Dependency direction Core <- Drivers/Engine/Storage <- Server hop ly.
+- Driver contract nho va de mo rong protocol.
+- Mot worker tren moi device tao fault isolation tot.
+- Poll va write duoc serialize bang SemaphoreSlim.
+- TagValue immutable va mang theo quality/timestamp.
+- Tag duoc mark Bad khi communication fault.
+- Poll loop khong bi SignalR backpressure.
+- Alarm dung storage tag ID, nen van gan dung tag sau rename/move.
+- SQLite/EF migrations phu hop cho embedded gateway.
+- Co simulator driver de test runtime khong can phan cung.
+
+======================================================================
+5. DANH GIA THEO HANG MUC
+======================================================================
+
+- Cau truc solution: Tot.
+- Core domain model: Kha tot cho POC.
+- Driver abstraction: Tot, can them validation va capability metadata.
+- Runtime concurrency/reload: Can thiet ke lai truoc production.
+- Modbus TCP: Dung duoc cho thu nghiem, chua phu hop nhieu thiet bi thuc te.
+- Northbound/server transmission: Chua co kien truc loi.
+- Security: Chua dat yeu cau gateway cong nghiep.
+- Operational resilience: Can store-and-forward, metrics va health sau hon.
+- Test coverage: Chua du cho race, reload failure va network failure.
+
+======================================================================
+6. THU TU UU TIEN DE XU LY
+======================================================================
+
+1. Atomic runtime snapshot va transactional reload.
+2. Validation contract cho driver/config truoc khi apply.
+3. Read-plan Modbus theo cac block dia chi thuc te.
+4. Northbound abstraction va persistent store-and-forward.
+5. Write pipeline: permission, validation, inverse scaling va audit.
+6. Scan groups, deadband va per-tag/per-block diagnostics.
+7. Authentication, authorization, TLS va operational security.
+8. Tang test coverage cho concurrency va network failure.
+9. Sau do moi mo rong Modbus RTU, IEC 60870-5-104, S7 hoac OPC UA.
+
+======================================================================
+7. GHI CHU KIEM TRA
+======================================================================
+
+Da thuc hien review read-only va khong sua source code.
+
+Da thu chay dotnet test --no-restore, nhung lenh khong hoan tat trong gioi han
+cho cua moi truong review. Vi vay tai thoi diem lap bao cao nay khong ket luan
+test suite pass hay fail.

@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\HinoGateway.Core\HinoGateway.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Deliberately dependency-free: the gateway persists its configuration as a JSON file, so
+         there is no database engine, no native library per architecture and no schema migration to
+         apply in the field. Only Microsoft.Extensions.Logging.Abstractions is needed. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.*" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

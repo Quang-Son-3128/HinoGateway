@@ -1,0 +1,439 @@
+@page "/alarms"
+@using System.Net.Http.Json
+@using System.Text.Json
+@using Microsoft.AspNetCore.SignalR.Client
+@implements IAsyncDisposable
+@inject NavigationManager Nav
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+<PageTitle>HinoGateway — Alarms</PageTitle>
+
+<div class="page-head">
+    <h1>Alarms</h1>
+    <MudChip T="string" Size="Size.Small"
+             Color="@(_connected ? Color.Success : Color.Error)"
+             Icon="@(_connected ? Icons.Material.Filled.Sensors : Icons.Material.Filled.SensorsOff)"
+             Variant="Variant.Filled">
+        @(_connected ? "LIVE" : "OFFLINE")
+    </MudChip>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+               StartIcon="@Icons.Material.Filled.DoneAll" OnClick="AckAllAsync"
+               Disabled="@(_busy || _outstanding == 0)">
+        Acknowledge all (@_outstanding)
+    </MudButton>
+</div>
+
+<div class="kpi-row mb-4">
+    <div class="kpi @(_summary.Active > 0 ? "kpi-bad" : "kpi-good")">
+        <div class="kpi-label">Active</div>
+        <div class="kpi-value">@_summary.Active</div>
+        <div class="kpi-sub">@(_summary.HighestActiveSeverity is null ? "all normal" : $"highest: {_summary.HighestActiveSeverity}")</div>
+    </div>
+    <div class="kpi @(_summary.Unacknowledged > 0 ? "kpi-warn" : "kpi-neutral")">
+        <div class="kpi-label">Unacknowledged</div>
+        <div class="kpi-value">@_summary.Unacknowledged</div>
+        <div class="kpi-sub">awaiting operator</div>
+    </div>
+    <div class="kpi kpi-accent">
+        <div class="kpi-label">Configured</div>
+        <div class="kpi-value">@_summary.Configured</div>
+        <div class="kpi-sub"><MudLink Href="alarm-rules" Class="mono" Style="font-size:.7rem">edit rules →</MudLink></div>
+    </div>
+    @foreach (var sc in _summary.ActiveBySeverity)
+    {
+        <div class="kpi" style="border-left-color:@SeverityColor(sc.Severity)">
+            <div class="kpi-label">@sc.Severity</div>
+            <div class="kpi-value">@sc.Count</div>
+            <div class="kpi-sub">active</div>
+        </div>
+    }
+</div>
+
+<MudTabs Elevation="0" Outlined ApplyEffectsToContainer Rounded @bind-ActivePanelIndex="_tab">
+    <MudTabPanel Text="@($"Active ({_active.Count})")" Icon="@Icons.Material.Filled.NotificationsActive">
+        @if (_active.Count == 0)
+        {
+            <div class="alarm-empty">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Style="color:var(--hino-good);font-size:2rem" />
+                <MudText Typo="Typo.subtitle1">No outstanding alarms</MudText>
+                <MudText Typo="Typo.caption" Style="opacity:.6">Every configured alarm is in the Normal state.</MudText>
+            </div>
+        }
+        else
+        {
+            <MudTable Items="_active" Dense Hover Elevation="0" Breakpoint="Breakpoint.Sm" RowClass="alarm-row">
+                <HeaderContent>
+                    <MudTh Style="width:2rem"></MudTh>
+                    <MudTh>Severity</MudTh>
+                    <MudTh>Alarm</MudTh>
+                    <MudTh>Tag</MudTh>
+                    <MudTh>Condition</MudTh>
+                    <MudTh Style="text-align:right">Limit</MudTh>
+                    <MudTh Style="text-align:right">Value</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh Style="text-align:right">Since</MudTh>
+                    <MudTh Style="text-align:right">Duration</MudTh>
+                    <MudTh Style="width:6rem"></MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>
+                        <span class="led @StatusLed(context.Status)"></span>
+                    </MudTd>
+                    <MudTd DataLabel="Severity">
+                        <span class="sev-badge" style="background:@SeverityColor(context.Severity)">@context.Severity.ToString().ToUpperInvariant()</span>
+                    </MudTd>
+                    <MudTd DataLabel="Alarm">
+                        <div style="font-weight:600">@context.Name</div>
+                        @if (!string.IsNullOrEmpty(context.Message))
+                        {
+                            <div style="opacity:.6;font-size:.78rem">@context.Message</div>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Tag">
+                        <MudLink Href="@($"tags?select={Uri.EscapeDataString(context.TagId)}")" Class="mono" Style="font-size:.8rem">
+                            @context.TagId
+                        </MudLink>
+                    </MudTd>
+                    <MudTd DataLabel="Condition"><span class="mono" style="font-size:.8rem">@ConditionText(context.Condition)</span></MudTd>
+                    <MudTd DataLabel="Limit" Style="text-align:right">
+                        <span class="mono" style="font-size:.8rem;opacity:.8">@(IsLevel(context.Condition) ? context.Limit.ToString("0.###") : "—")</span>
+                    </MudTd>
+                    <MudTd DataLabel="Value" Style="text-align:right"><span class="tag-value">@FormatValue(context.Value)</span></MudTd>
+                    <MudTd DataLabel="Status">
+                        <span class="mono" style="font-size:.76rem;color:@StatusColor(context.Status)">@StatusText(context.Status)</span>
+                        @if (context.AckedAt is not null)
+                        {
+                            <div style="opacity:.55;font-size:.7rem">by @(context.AckedBy ?? "operator")</div>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Since" Style="text-align:right">
+                        <span class="mono" style="font-size:.78rem;opacity:.7">@FormatTime(context.ActiveSince)</span>
+                    </MudTd>
+                    <MudTd DataLabel="Duration" Style="text-align:right">
+                        <span class="mono" style="font-size:.78rem">@Duration(context)</span>
+                    </MudTd>
+                    <MudTd Style="text-align:right">
+                        @if (context.Status is AlarmStatus.Active or AlarmStatus.ClearedUnacknowledged)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                                       OnClick="@(() => AckAsync(context))" Disabled="_busy">Ack</MudButton>
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </MudTabPanel>
+
+    <MudTabPanel Text="History" Icon="@Icons.Material.Filled.History">
+        <MudToolBar Dense Class="px-3" Style="gap:.6rem">
+            <MudIcon Icon="@Icons.Material.Filled.FilterAlt" Size="Size.Small" Style="opacity:.6" />
+            <MudSelect T="int" @bind-Value="_historyHours" @bind-Value:after="LoadHistoryAsync" Dense
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:11rem" Label="Range">
+                <MudSelectItem Value="1">Last hour</MudSelectItem>
+                <MudSelectItem Value="8">Last 8 hours</MudSelectItem>
+                <MudSelectItem Value="24">Last 24 hours</MudSelectItem>
+                <MudSelectItem Value="168">Last 7 days</MudSelectItem>
+                <MudSelectItem Value="0">Everything kept</MudSelectItem>
+            </MudSelect>
+            <MudTextField T="string" @bind-Value="_historyFilter" @bind-Value:after="StateHasChanged"
+                          Placeholder="Filter…" Adornment="Adornment.Start" Immediate Clearable
+                          AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Small"
+                          Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:16rem" />
+            <MudSpacer />
+            <MudText Typo="Typo.caption" Class="mono" Style="opacity:.5">@HistoryView.Count / @_history.Count lines</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="LoadHistoryAsync" />
+        </MudToolBar>
+        <MudTable Items="HistoryView" Dense Hover Elevation="0" Breakpoint="Breakpoint.Sm"
+                  Virtualize FixedHeader Height="55vh">
+            <HeaderContent>
+                <MudTh Style="text-align:right">Time</MudTh>
+                <MudTh>Event</MudTh>
+                <MudTh>Severity</MudTh>
+                <MudTh>Alarm</MudTh>
+                <MudTh>Tag</MudTh>
+                <MudTh Style="text-align:right">Value</MudTh>
+                <MudTh>Message</MudTh>
+                <MudTh>Operator</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd Style="text-align:right">
+                    <span class="mono" style="font-size:.78rem;opacity:.75">@context.Timestamp.ToLocalTime().ToString("dd/MM HH:mm:ss")</span>
+                </MudTd>
+                <MudTd DataLabel="Event">
+                    <span class="evt-badge" style="color:@EventColor(context.Type);border-color:@EventColor(context.Type)">
+                        @context.Type.ToString().ToUpperInvariant()
+                    </span>
+                </MudTd>
+                <MudTd DataLabel="Severity">
+                    <span class="mono" style="font-size:.74rem;color:@SeverityColor(context.Severity)">@context.Severity.ToString().ToUpperInvariant()</span>
+                </MudTd>
+                <MudTd DataLabel="Alarm">@context.Name</MudTd>
+                <MudTd DataLabel="Tag"><span class="mono" style="font-size:.78rem;opacity:.75">@context.TagId</span></MudTd>
+                <MudTd DataLabel="Value" Style="text-align:right">
+                    <span class="mono" style="font-size:.8rem">@(context.Value is null ? "—" : context.Value.Value.ToString("0.###"))</span>
+                </MudTd>
+                <MudTd DataLabel="Message" Style="opacity:.7;font-size:.85rem">@context.Message</MudTd>
+                <MudTd DataLabel="Operator"><span class="mono" style="font-size:.78rem;opacity:.7">@context.User</span></MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private List<AlarmState> _active = new();
+    private List<AlarmEvent> _history = new();
+    private AlarmSummary _summary = new(0, 0, 0, null, Array.Empty<SeverityCount>());
+    private HubConnection? _hub;
+    private System.Threading.Timer? _tickTimer;
+    private System.Threading.Timer? _pollTimer;
+    private bool _connected;
+    private bool _busy;
+    private int _tab;
+    private int _historyHours = 24;
+    private string _historyFilter = "";
+
+    private int _outstanding => _active.Count(a => a.Status is AlarmStatus.Active or AlarmStatus.ClearedUnacknowledged);
+
+    private List<AlarmEvent> HistoryView =>
+        string.IsNullOrWhiteSpace(_historyFilter)
+            ? _history
+            : _history.Where(e =>
+                e.Name.Contains(_historyFilter, StringComparison.OrdinalIgnoreCase)
+                || e.TagId.Contains(_historyFilter, StringComparison.OrdinalIgnoreCase)
+                || (e.Message?.Contains(_historyFilter, StringComparison.OrdinalIgnoreCase) ?? false)
+                || e.Type.ToString().Contains(_historyFilter, StringComparison.OrdinalIgnoreCase)
+                || e.Severity.ToString().Contains(_historyFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        await LoadHistoryAsync();
+
+        // Durations tick once a second; the alarm data itself arrives over SignalR.
+        _tickTimer = new System.Threading.Timer(_ => InvokeAsync(StateHasChanged), null, 1000, 1000);
+        // Backstop poll in case the hub is briefly down (alarm data must never look stale).
+        _pollTimer = new System.Threading.Timer(_ => InvokeAsync(RefreshAsync), null, 5000, 5000);
+
+        _hub = new HubConnectionBuilder()
+            .WithUrl(Nav.ToAbsoluteUri("/hubs/alarms"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hub.On<List<AlarmState>>("AlarmsChanged", states =>
+        {
+            _active = states;
+            return InvokeAsync(async () =>
+            {
+                StateHasChanged();
+                await RefreshSummaryAsync();
+            });
+        });
+
+        _hub.On<List<AlarmEvent>>("AlarmEvents", events =>
+        {
+            // Newest first, same order as the journal query.
+            _history.InsertRange(0, events.OrderByDescending(e => e.Timestamp));
+            return InvokeAsync(StateHasChanged);
+        });
+
+        _hub.Reconnected += _ => { _connected = true; return InvokeAsync(RefreshAsync); };
+        _hub.Reconnecting += _ => { _connected = false; return InvokeAsync(StateHasChanged); };
+        _hub.Closed += _ => { _connected = false; return InvokeAsync(StateHasChanged); };
+
+        await _hub.StartAsync();
+        _connected = true;
+        _active = await _hub.InvokeAsync<List<AlarmState>>("GetActive");
+        StateHasChanged();
+    }
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            _active = await Http.GetFromJsonAsync<List<AlarmState>>("api/alarms/active") ?? new();
+            await RefreshSummaryAsync();
+        }
+        catch { /* server briefly unreachable — keep the last known state */ }
+        StateHasChanged();
+    }
+
+    private async Task RefreshSummaryAsync()
+    {
+        try
+        {
+            _summary = await Http.GetFromJsonAsync<AlarmSummary>("api/alarms/summary") ?? _summary;
+        }
+        catch { }
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        try
+        {
+            var url = "api/alarms/events?limit=1000";
+            if (_historyHours > 0)
+                url += $"&from={Uri.EscapeDataString(DateTimeOffset.UtcNow.AddHours(-_historyHours).ToString("o"))}";
+            _history = await Http.GetFromJsonAsync<List<AlarmEvent>>(url) ?? new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("Could not load the alarm journal: " + ex.Message, Severity.Error);
+        }
+        StateHasChanged();
+    }
+
+    private async Task AckAsync(AlarmState alarm)
+    {
+        _busy = true;
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/alarms/ack", new { alarmId = alarm.AlarmId, all = false, user = Operator });
+            if (resp.IsSuccessStatusCode)
+                await RefreshAsync();
+            else
+                Snackbar.Add($"Acknowledge failed: {await resp.Content.ReadAsStringAsync()}", Severity.Error);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task AckAllAsync()
+    {
+        var confirm = await Dialogs.ShowMessageBoxAsync(
+            "Acknowledge all",
+            $"Acknowledge {_outstanding} outstanding alarm(s)?",
+            yesText: "Acknowledge", cancelText: "Cancel");
+        if (confirm != true)
+            return;
+
+        _busy = true;
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/alarms/ack", new { alarmId = (string?)null, all = true, user = Operator });
+            if (resp.IsSuccessStatusCode)
+            {
+                var result = await resp.Content.ReadFromJsonAsync<AckResult>();
+                Snackbar.Add($"Acknowledged {result?.Acknowledged ?? 0} alarm(s)", Severity.Success);
+                await RefreshAsync();
+            }
+            else
+            {
+                Snackbar.Add($"Acknowledge failed: {await resp.Content.ReadAsStringAsync()}", Severity.Error);
+            }
+        }
+        finally { _busy = false; }
+    }
+
+    private sealed record AckResult(int Acknowledged);
+
+    // No user accounts yet (Phase 3 item) — journal the acknowledgement against a generic operator
+    // so the audit trail is still honest about what happened, just not about who.
+    private const string Operator = "operator";
+
+    private static bool IsLevel(AlarmCondition c) =>
+        c is AlarmCondition.Hi or AlarmCondition.HiHi or AlarmCondition.Lo or AlarmCondition.LoLo;
+
+    private static string ConditionText(AlarmCondition c) => c switch
+    {
+        AlarmCondition.Hi => "HI  ≥",
+        AlarmCondition.HiHi => "HIHI ≥",
+        AlarmCondition.Lo => "LO  ≤",
+        AlarmCondition.LoLo => "LOLO ≤",
+        AlarmCondition.Digital => "DIGITAL",
+        _ => "BAD QUALITY",
+    };
+
+    private static string SeverityColor(AlarmSeverity s) => s switch
+    {
+        AlarmSeverity.Critical => "#dc2626",
+        AlarmSeverity.Major => "#ea580c",
+        AlarmSeverity.Minor => "#d97706",
+        AlarmSeverity.Warning => "#ca8a04",
+        _ => "#0284c7",
+    };
+
+    private static string StatusLed(AlarmStatus s) => s switch
+    {
+        AlarmStatus.Active => "led-bad",                  // blinks: needs attention now
+        AlarmStatus.ActiveAcknowledged => "led-warn",
+        AlarmStatus.ClearedUnacknowledged => "led-idle",
+        _ => "led-good",
+    };
+
+    private static string StatusColor(AlarmStatus s) => s switch
+    {
+        AlarmStatus.Active => "var(--hino-bad)",
+        AlarmStatus.ActiveAcknowledged => "var(--hino-warn)",
+        AlarmStatus.ClearedUnacknowledged => "var(--mud-palette-text-secondary)",
+        _ => "var(--hino-good)",
+    };
+
+    private static string StatusText(AlarmStatus s) => s switch
+    {
+        AlarmStatus.Active => "ACTIVE",
+        AlarmStatus.ActiveAcknowledged => "ACTIVE / ACKED",
+        AlarmStatus.ClearedUnacknowledged => "CLEARED / UNACKED",
+        _ => "NORMAL",
+    };
+
+    private static string EventColor(AlarmEventType t) => t switch
+    {
+        AlarmEventType.Activated => "var(--hino-bad)",
+        AlarmEventType.Cleared => "var(--hino-good)",
+        _ => "var(--mud-palette-primary)",
+    };
+
+    // Local time (the operator's), not UTC.
+    private static string FormatTime(DateTimeOffset? t)
+    {
+        if (t is null)
+            return "—";
+        var local = t.Value.ToLocalTime();
+        return local.Date == DateTime.Now.Date
+            ? local.ToString("HH:mm:ss")
+            : local.ToString("dd/MM HH:mm:ss");
+    }
+
+    // How long the alarm has been active, or how long ago it cleared.
+    private static string Duration(AlarmState a)
+    {
+        var reference = a.Status is AlarmStatus.Active or AlarmStatus.ActiveAcknowledged ? a.ActiveSince : a.ClearedAt;
+        if (reference is null)
+            return "—";
+        var span = DateTimeOffset.UtcNow - reference.Value;
+        if (span < TimeSpan.Zero)
+            span = TimeSpan.Zero;
+        return span.TotalDays >= 1
+            ? $"{(int)span.TotalDays}d {span.Hours}h"
+            : span.TotalHours >= 1
+                ? $"{(int)span.TotalHours}h {span.Minutes:00}m"
+                : $"{span.Minutes:00}:{span.Seconds:00}";
+    }
+
+    private static string FormatValue(object? value)
+    {
+        if (value is null) return "—";
+        if (value is JsonElement je)
+        {
+            return je.ValueKind switch
+            {
+                JsonValueKind.Number => je.GetDouble().ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                JsonValueKind.String => je.GetString() ?? "",
+                _ => je.ToString(),
+            };
+        }
+        return value.ToString() ?? "";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _tickTimer?.Dispose();
+        _pollTimer?.Dispose();
+        if (_hub is not null)
+            await _hub.DisposeAsync();
+    }
+}

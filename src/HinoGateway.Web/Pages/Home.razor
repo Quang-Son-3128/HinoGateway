@@ -1,0 +1,346 @@
+@page "/"
+@using System.Net.Http.Json
+@using System.Text.Json
+@using Microsoft.AspNetCore.SignalR.Client
+@implements IAsyncDisposable
+@inject NavigationManager Nav
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+@using HinoGateway.Web.Components
+
+<PageTitle>HinoGateway — Live Data</PageTitle>
+
+<div class="page-head">
+    <h1>Live Data</h1>
+    <MudChip T="string" Size="Size.Small"
+             Color="@(_connected ? Color.Success : Color.Error)"
+             Icon="@(_connected ? Icons.Material.Filled.Sensors : Icons.Material.Filled.SensorsOff)"
+             Variant="Variant.Filled">
+        @(_connected ? "LIVE" : "OFFLINE")
+    </MudChip>
+    <MudSpacer />
+    <MudText Typo="Typo.caption" Class="mono" Style="opacity:.55">@_updateCount updates received</MudText>
+</div>
+
+<div class="kpi-row mb-4">
+    <div class="kpi kpi-accent">
+        <div class="kpi-label">Connections</div>
+        <div class="kpi-value">@_health.Count(h => h.State == DeviceState.Connected)<span style="opacity:.45;font-size:.8em">/@_health.Count</span></div>
+        <div class="kpi-sub">connected / total</div>
+    </div>
+    <div class="kpi kpi-neutral">
+        <div class="kpi-label">Tags</div>
+        <div class="kpi-value">@_infos.Count</div>
+        <div class="kpi-sub">configured</div>
+    </div>
+    <div class="kpi kpi-good">
+        <div class="kpi-label">Good</div>
+        <div class="kpi-value">@_values.Values.Count(v => v.Quality == Quality.Good)</div>
+        <div class="kpi-sub">quality OK</div>
+    </div>
+    <div class="kpi kpi-bad">
+        <div class="kpi-label">Bad / Uncertain</div>
+        <div class="kpi-value">@_values.Values.Count(v => v.Quality != Quality.Good)</div>
+        <div class="kpi-sub">needs attention</div>
+    </div>
+</div>
+
+@if (_health.Count > 0)
+{
+    @* With many devices a card per device would bury the tag table — show cards for the
+       troubled ones only and summarise the healthy rest. *@
+    var cards = _health.Count <= 12
+        ? _health.OrderBy(x => x.DeviceId).ToList()
+        : _health.Where(h => h.State != DeviceState.Connected).OrderBy(x => x.DeviceId).Take(12).ToList();
+
+    @if (_health.Count > 12)
+    {
+        <MudText Typo="Typo.caption" Class="mono d-block mb-2" Style="opacity:.6">
+            @_health.Count(h => h.State == DeviceState.Connected)/@_health.Count connections healthy
+            @(cards.Count > 0 ? " — showing troubled only:" : "")
+        </MudText>
+    }
+    <div class="dev-row mb-4">
+        @foreach (var h in cards)
+        {
+            <div class="dev-card">
+                <div class="dev-head">
+                    <span class="led @StateLed(h.State)"></span>
+                    <span>@h.DeviceId</span>
+                    <MudSpacer />
+                    <span style="opacity:.6;font-size:.75em">@h.State.ToString().ToUpperInvariant()</span>
+                </div>
+                <div class="dev-stats">
+                    <span title="Latency of the last successful poll">⏱ @FormatLatency(h.LastPollLatency)</span>
+                    <span title="Successful polls">✓ @h.PollCount</span>
+                    <span title="Errors">✗ @h.ErrorCount</span>
+                </div>
+                @if (!string.IsNullOrEmpty(h.LastError) && h.State != DeviceState.Connected)
+                {
+                    <MudTooltip Text="@h.LastError">
+                        <div class="dev-error">@h.LastError</div>
+                    </MudTooltip>
+                }
+            </div>
+        }
+    </div>
+}
+
+@if (_infos.Count == 0)
+{
+    <MudProgressLinear Indeterminate Color="Color.Primary" Class="my-4" />
+}
+else
+{
+    <MudPaper Elevation="0" Outlined Class="mb-4">
+        <MudToolBar Dense Class="px-3" Style="gap:.6rem">
+            <MudIcon Icon="@Icons.Material.Filled.TableRows" Size="Size.Small" Style="opacity:.6" />
+            <MudText Typo="Typo.subtitle2">Tag values</MudText>
+            <MudText Typo="Typo.caption" Class="mono" Style="opacity:.5">@_view.Count / @_infos.Count</MudText>
+            <MudSpacer />
+            <MudTextField T="string" @bind-Value="_filter" @bind-Value:after="OnFilterChanged"
+                          Placeholder="Filter tags…" Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Small"
+                          Margin="Margin.Dense" Variant="Variant.Outlined" Clearable Immediate
+                          Style="max-width:16rem" />
+        </MudToolBar>
+        <MudTable Items="_view" Dense Hover Elevation="0" Class="hino-table"
+                  Virtualize FixedHeader Height="56vh"
+                  RowStyleFunc="RowStyle" Breakpoint="Breakpoint.Sm">
+            <HeaderContent>
+                <MudTh Style="width:2rem"></MudTh>
+                <MudTh>Tag ID</MudTh>
+                <MudTh>Name</MudTh>
+                <MudTh>Connection</MudTh>
+                <MudTh>Description</MudTh>
+                <MudTh Style="text-align:right">Value</MudTh>
+                <MudTh>Quality</MudTh>
+                <MudTh>Message</MudTh>
+                <MudTh Style="text-align:right">Last change</MudTh>
+                <MudTh Style="width:3rem"></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                @{
+                    var has = _values.TryGetValue(context.Id, out var s);
+                }
+                <MudTd Style="width:2rem">
+                    <span class="led @(has ? QualityLed(s!.Quality) : "led-idle")"></span>
+                </MudTd>
+                <MudTd DataLabel="Tag ID">
+                    <MudLink Href="@($"tags?select={Uri.EscapeDataString(context.Id)}")"
+                             Class="mono" Style="font-size:.82rem">@context.Id</MudLink>
+                </MudTd>
+                <MudTd DataLabel="Name">@context.Name</MudTd>
+                <MudTd DataLabel="Connection"><span class="mono" style="font-size:.8rem;opacity:.75">@context.DeviceId</span></MudTd>
+                <MudTd DataLabel="Description" Style="opacity:.7;font-size:.85rem">@context.Description</MudTd>
+                <MudTd DataLabel="Value" Style="text-align:right">
+                    <span class="tag-value @(has && IsFresh(s!.LastChanged) ? "changed" : "")">
+                        @(has ? FormatValue(s!.Value) : "—")
+                    </span>
+                    <span style="opacity:.5;font-size:.78rem">@context.Unit</span>
+                </MudTd>
+                <MudTd DataLabel="Quality">
+                    @if (has)
+                    {
+                        <span class="mono" style="font-size:.78rem;color:@QualityCss(s!.Quality)">@s.Quality.ToString().ToUpperInvariant()</span>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Message">
+                    @if (has && !string.IsNullOrEmpty(s!.StatusText))
+                    {
+                        <MudTooltip Text="@s.StatusText">
+                            <MudText Typo="Typo.caption" Color="@(s.Quality == Quality.Bad ? Color.Error : Color.Warning)"
+                                     Style="max-width:20rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">
+                                @s.StatusText
+                            </MudText>
+                        </MudTooltip>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Last change" Style="text-align:right">
+                    <span class="mono" style="opacity:.65;font-size:.78rem">@(has ? FormatLastChanged(s!.LastChanged) : "")</span>
+                </MudTd>
+                <MudTd Style="text-align:right">
+                    <MudTooltip Text="@($"Write a value to {context.Id}")">
+                        <MudIconButton Icon="@Icons.Material.Filled.Output" Size="Size.Small"
+                                       OnClick="@(() => OpenWriteAsync(context))" />
+                    </MudTooltip>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+
+}
+
+@code {
+    private readonly Dictionary<string, TagInfo> _infos = new();
+    private readonly Dictionary<string, TagSample> _values = new();
+    private List<TagInfo> _view = new();
+    private List<DeviceHealth> _health = new();
+    private HubConnection? _hub;
+    private System.Threading.Timer? _healthTimer;
+    private System.Threading.Timer? _renderTimer;
+    private volatile bool _dirty;
+    private bool _connected;
+    private long _updateCount;
+    private string _filter = "";
+
+    // The visible list is cached and rebuilt only when the tag set or the filter changes —
+    // sorting/filtering 10k tags on every render tick would waste the WASM main thread.
+    private void RebuildView()
+    {
+        IEnumerable<TagInfo> q = _infos.Values;
+        if (!string.IsNullOrWhiteSpace(_filter))
+            q = q.Where(i =>
+                i.Id.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                || i.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                || i.DeviceId.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                || (i.Description?.Contains(_filter, StringComparison.OrdinalIgnoreCase) ?? false));
+        _view = q.OrderBy(i => i.Id, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private void OnFilterChanged() => RebuildView();
+
+    /// <summary>Control action: write a value to this row's tag (the device rejects read-only points).</summary>
+    private async Task OpenWriteAsync(TagInfo tag)
+    {
+        var parameters = new DialogParameters<WriteValueDialog>
+        {
+            { x => x.TagId, tag.Id },
+            { x => x.Name, tag.Name },
+            { x => x.Unit, tag.Unit },
+            { x => x.CurrentValue, _values.TryGetValue(tag.Id, out var s) ? FormatValue(s.Value) : null },
+        };
+
+        var dialog = await Dialogs.ShowAsync<WriteValueDialog>("Write value", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true });
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: string written })
+            Snackbar.Add($"Wrote {written}", Severity.Success);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var infos = await Http.GetFromJsonAsync<List<TagInfo>>("api/tags") ?? new();
+        foreach (var i in infos)
+            _infos[i.Id] = i;
+        RebuildView();
+
+        _healthTimer = new System.Threading.Timer(_ => InvokeAsync(RefreshHealthAsync), null, 0, 3000);
+
+        // Render throttle: SignalR can deliver one batch per device per second (100+/s at
+        // scale). Samples are absorbed into _values as they arrive; the UI repaints at most
+        // ~3x/s, only when something actually arrived.
+        _renderTimer = new System.Threading.Timer(_ =>
+        {
+            if (!_dirty) return;
+            _dirty = false;
+            InvokeAsync(StateHasChanged);
+        }, null, 300, 300);
+
+        _hub = new HubConnectionBuilder()
+            .WithUrl(Nav.ToAbsoluteUri("/hubs/telemetry"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hub.On<List<TagSample>>("TagsUpdated", Apply);
+        _hub.Reconnected += _ => { _connected = true; return InvokeAsync(StateHasChanged); };
+        _hub.Reconnecting += _ => { _connected = false; return InvokeAsync(StateHasChanged); };
+        _hub.Closed += _ => { _connected = false; return InvokeAsync(StateHasChanged); };
+
+        await _hub.StartAsync();
+        _connected = true;
+
+        var snapshot = await _hub.InvokeAsync<List<TagSample>>("GetSnapshot");
+        Apply(snapshot);
+    }
+
+    private async Task RefreshHealthAsync()
+    {
+        try
+        {
+            _health = await Http.GetFromJsonAsync<List<DeviceHealth>>("api/health") ?? new();
+            StateHasChanged();
+        }
+        catch { /* server briefly unreachable — keep last known */ }
+    }
+
+    private void Apply(List<TagSample> samples)
+    {
+        foreach (var s in samples)
+            _values[s.TagId] = s;
+        _updateCount++;
+        _dirty = true; // repaint happens on the next render-timer tick
+    }
+
+    // A value that changed within the last 1.5 s gets the highlight class; the next
+    // render (SignalR pushes every poll) drops the class and CSS fades it out.
+    private static bool IsFresh(DateTimeOffset lastChanged) =>
+        DateTimeOffset.UtcNow - lastChanged < TimeSpan.FromSeconds(1.5);
+
+    private static string QualityLed(Quality q) => q switch
+    {
+        Quality.Good => "led-good",
+        Quality.Uncertain => "led-warn",
+        _ => "led-bad",
+    };
+
+    private static string QualityCss(Quality q) => q switch
+    {
+        Quality.Good => "var(--hino-good)",
+        Quality.Uncertain => "var(--hino-warn)",
+        _ => "var(--hino-bad)",
+    };
+
+    private static string StateLed(DeviceState s) => s switch
+    {
+        DeviceState.Connected => "led-good",
+        DeviceState.Connecting => "led-warn",
+        DeviceState.Faulted => "led-bad",
+        _ => "led-idle",
+    };
+
+    private string RowStyle(TagInfo info, int _) =>
+        _values.TryGetValue(info.Id, out var s) && s.Quality == Quality.Bad
+            ? "background:rgba(239,68,68,.06)"
+            : "";
+
+    private static string FormatLatency(TimeSpan? t) =>
+        t is null ? "— ms" : $"{t.Value.TotalMilliseconds:0} ms";
+
+    // Local time (the operator's), not UTC. Time only while it's today (the common case);
+    // prepend the date once it isn't.
+    private static string FormatLastChanged(DateTimeOffset t)
+    {
+        var local = t.ToLocalTime();
+        return local.Date == DateTime.Now.Date
+            ? local.ToString("HH:mm:ss.fff")
+            : local.ToString("dd/MM HH:mm:ss");
+    }
+
+    private static string FormatValue(object? value)
+    {
+        if (value is null) return "—";
+        if (value is JsonElement je)
+        {
+            return je.ValueKind switch
+            {
+                JsonValueKind.Number => je.GetDouble().ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                JsonValueKind.String => je.GetString() ?? "",
+                _ => je.ToString()
+            };
+        }
+        return value.ToString() ?? "";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _healthTimer?.Dispose();
+        _renderTimer?.Dispose();
+        if (_hub is not null)
+            await _hub.DisposeAsync();
+    }
+}

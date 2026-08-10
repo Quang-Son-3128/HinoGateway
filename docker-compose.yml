@@ -1,0 +1,15 @@
+services:
+  hinogateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hinogateway:phase0
+    container_name: hinogateway
+    ports:
+      - "2000:2000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+    restart: unless-stopped
+    # For real serial drivers later, pass the device through, e.g.:
+    # devices:
+    #   - "/dev/ttyUSB0:/dev/ttyUSB0"

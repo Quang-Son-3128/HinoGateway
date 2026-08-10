@@ -1,0 +1,161 @@
+{
+  "Format": "hino-project",
+  "Version": 4,
+  "ExportedAt": "2026-07-31T02:35:15.0324082+00:00",
+  "Note": null,
+  "Devices": [
+    {
+      "Id": "MB-1",
+      "Driver": "ModbusTCP",
+      "ScanIntervalMs": 500,
+      "Settings": {
+        "Port": "502",
+        "Host": "127.0.0.1",
+        "TimeoutMs": "1000",
+        "UnitId": "1"
+      },
+      "Tags": []
+    }
+  ],
+  "Groups": [
+    {
+      "Id": "grp-MB-1",
+      "ParentId": null,
+      "Name": "MB-1"
+    },
+    {
+      "Id": "fac",
+      "ParentId": null,
+      "Name": "Factory"
+    },
+    {
+      "Id": "line1",
+      "ParentId": "fac",
+      "Name": "Line A"
+    }
+  ],
+  "Tags": [
+    {
+      "Id": "MB-1",
+      "GroupId": "grp-MB-1",
+      "DeviceId": "MB-1",
+      "Name": "tag test",
+      "Path": "MB-1/tag test",
+      "Address": "40001",
+      "DataType": 1,
+      "Unit": null,
+      "Description": "Thanh ghi thu nghiem Mbslave HR0",
+      "Scale": 1,
+      "Offset": 0
+    },
+    {
+      "Id": "t-coil1",
+      "GroupId": "line1",
+      "DeviceId": "MB-1",
+      "Name": "Coil1",
+      "Path": "Factory/Line A/Coil1",
+      "Address": "40006",
+      "DataType": 1,
+      "Unit": null,
+      "Description": null,
+      "Scale": 1,
+      "Offset": 0
+    },
+    {
+      "Id": "3e329e65c65b418ca59c698423fd247f",
+      "GroupId": "grp-MB-1",
+      "DeviceId": "MB-1",
+      "Name": "tag2",
+      "Path": "",
+      "Address": "40003",
+      "DataType": 1,
+      "Unit": null,
+      "Description": null,
+      "Scale": 1,
+      "Offset": 0
+    }
+  ],
+  "Alarms": [
+    {
+      "Id": "test-hi",
+      "Name": "Tag2 high",
+      "TagId": "3e329e65c65b418ca59c698423fd247f",
+      "TagPath": "MB-1/tag2",
+      "Condition": 0,
+      "Limit": 100,
+      "Hysteresis": 10,
+      "OnDelayMs": 0,
+      "OffDelayMs": 0,
+      "Severity": 3,
+      "Message": "tag2 above 100",
+      "Enabled": true,
+      "RequiresAck": true,
+      "TriggerOnTrue": true
+    },
+    {
+      "Id": "test-hihi",
+      "Name": "Tag2 very high",
+      "TagId": "3e329e65c65b418ca59c698423fd247f",
+      "TagPath": "MB-1/tag2",
+      "Condition": 1,
+      "Limit": 1000,
+      "Hysteresis": 0,
+      "OnDelayMs": 0,
+      "OffDelayMs": 0,
+      "Severity": 4,
+      "Message": "tag2 above 1000",
+      "Enabled": true,
+      "RequiresAck": true,
+      "TriggerOnTrue": true
+    }
+  ],
+  "Iec104": {
+    "Enabled": true,
+    "BindAddress": "127.0.0.1",
+    "Port": 2404,
+    "CommonAddress": 1,
+    "MaxConnections": 4,
+    "AllowCommands": true,
+    "AllowClockSync": true,
+    "TimestampsInUtc": false,
+    "PeriodicIntervalSeconds": 60,
+    "K": 12,
+    "W": 8,
+    "T0": 30,
+    "T1": 15,
+    "T2": 10,
+    "T3": 20,
+    "Points": [
+      {
+        "TagId": "MB-1",
+        "TagPath": "",
+        "Ioa": 1001,
+        "Type": 4,
+        "Deadband": 0,
+        "WithTimestamp": false,
+        "Command": 0,
+        "ReportScale": 1
+      },
+      {
+        "TagId": "3e329e65c65b418ca59c698423fd247f",
+        "TagPath": "",
+        "Ioa": 1002,
+        "Type": 4,
+        "Deadband": 0,
+        "WithTimestamp": false,
+        "Command": 5,
+        "ReportScale": 1
+      },
+      {
+        "TagId": "t-coil1",
+        "TagPath": "",
+        "Ioa": 1003,
+        "Type": 4,
+        "Deadband": 0,
+        "WithTimestamp": false,
+        "Command": 0,
+        "ReportScale": 1
+      }
+    ]
+  }
+}

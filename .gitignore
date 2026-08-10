@@ -1,0 +1,13 @@
+bin/
+obj/
+.vs/
+*.user
+node_modules/
+publish/
+
+# Trang thai luc chay cua gateway - khong bao gio commit
+hino.secrets.json
+hino.retain.json
+logs/
+data/
+*.tmp

@@ -1,0 +1,237 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<MudThemeProvider IsDarkMode="_isDark" IsDarkModeChanged="OnDarkModeChanged" Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="0" Dense Class="hino-appbar">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" Size="Size.Small"
+                       OnClick="@(() => _drawerOpen = !_drawerOpen)" />
+        <div class="hino-logo ms-2 me-3">
+            <MudIcon Icon="@Icons.Material.Filled.Lan" Size="Size.Small" />
+        </div>
+        <div class="d-flex flex-column" style="line-height:1.1">
+            <MudText Typo="Typo.subtitle1" Style="font-weight:700;letter-spacing:.02em">HinoGateway</MudText>
+            <MudText Typo="Typo.caption" Style="opacity:.55;font-size:.65rem;letter-spacing:.14em;text-transform:uppercase">SCADA Gateway</MudText>
+        </div>
+        <MudSpacer />
+        <div class="hino-clock me-3" title="@($"Local time on this machine ({TimeZoneInfo.Local.StandardName})")">
+            <MudIcon Icon="@Icons.Material.Filled.Schedule" Size="Size.Small" Style="opacity:.6" />
+            <span>@_now.ToString("yyyy-MM-dd HH:mm:ss")</span>
+            <span style="opacity:.5;font-size:.7em">@_utcOffset</span>
+        </div>
+        <MudTooltip Text="@(_isDark ? "Light theme" : "Dark theme")">
+            <MudIconButton Icon="@(_isDark ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                           Color="Color.Inherit" Size="Size.Small" OnClick="ToggleThemeAsync" />
+        </MudTooltip>
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" Elevation="0" ClipMode="DrawerClipMode.Always"
+               Variant="@DrawerVariant.Responsive" Width="220px" Class="hino-drawer">
+        <MudNavMenu Class="pt-2">
+            <MudText Typo="Typo.caption" Class="hino-nav-section">Monitoring</MudText>
+            <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.MonitorHeart">Live Data</MudNavLink>
+            <MudNavLink Href="alarms" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.NotificationsActive">
+                <span class="d-inline-flex align-center" style="gap:.4rem">
+                    Alarms
+                    @if (_alarmsUnacked > 0)
+                    {
+                        <span class="sev-badge" style="background:var(--hino-bad)">@_alarmsUnacked</span>
+                    }
+                </span>
+            </MudNavLink>
+            <MudText Typo="Typo.caption" Class="hino-nav-section mt-3">Configuration</MudText>
+            <MudNavLink Href="connections" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Cable">Connections</MudNavLink>
+            <MudNavLink Href="tags" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.AccountTree">Tag Database</MudNavLink>
+            <MudNavLink Href="alarm-rules" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Rule">Alarm Rules</MudNavLink>
+            <MudNavLink Href="iec104" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.ElectricalServices">IEC-104 Link</MudNavLink>
+        </MudNavMenu>
+        <MudSpacer />
+        <div class="hino-drawer-footer">
+            <MudText Typo="Typo.caption" Style="opacity:.45">HinoGateway v0.1 — Phase 1</MudText>
+        </div>
+    </MudDrawer>
+
+    <MudMainContent Class="hino-main">
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pt-5 px-5 pb-4">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+
+    <footer class="hino-statusbar">
+        <span class="sb-item">
+            <span class="led @(_serverOk ? "led-good" : "led-bad")"></span>
+            @(_serverOk ? "Server online" : "Server unreachable")
+        </span>
+        <span class="sb-sep"></span>
+        <span class="sb-item" title="Devices connected / total">
+            <MudIcon Icon="@Icons.Material.Filled.Cable" Style="font-size:.85rem" />
+            Devices <b>@_devicesConnected/@_devicesTotal</b>
+        </span>
+        <span class="sb-sep"></span>
+        <span class="sb-item" title="Tag qualities">
+            <MudIcon Icon="@Icons.Material.Filled.Tag" Style="font-size:.85rem" />
+            Tags <b>@_tagsTotal</b>
+            <span class="sb-good">● @_tagsGood good</span>
+            @if (_tagsBad > 0)
+            {
+                <span class="sb-bad">● @_tagsBad bad</span>
+            }
+        </span>
+        <span class="sb-sep"></span>
+        <a class="sb-item" href="alarms" title="Active alarms / unacknowledged" style="color:inherit;text-decoration:none">
+            <span class="led @(_alarmsActive > 0 ? "led-bad" : "led-good")"></span>
+            Alarms
+            @if (_alarmsActive > 0 || _alarmsUnacked > 0)
+            {
+                <span class="sb-alarm">@_alarmsActive active</span>
+                <span style="opacity:.6">/ @_alarmsUnacked unacked</span>
+            }
+            else
+            {
+                <span class="sb-alarm-quiet">normal</span>
+            }
+        </a>
+        <MudSpacer />
+        <span class="sb-item" style="opacity:.55">@_now.ToString("HH:mm:ss") @_utcOffset</span>
+    </footer>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+    private bool _isDark = true; // industrial default: dark
+    private System.Threading.Timer? _clockTimer;
+    private System.Threading.Timer? _healthTimer;
+    // Times are shown in the operator's own timezone — the browser's, which on the industrial PC
+    // is the machine's. The UTC offset is displayed alongside so a screenshot stays unambiguous.
+    private DateTime _now = DateTime.Now;
+    private static readonly string _utcOffset = FormatOffset(TimeZoneInfo.Local.GetUtcOffset(DateTime.Now));
+
+    private static string FormatOffset(TimeSpan offset) =>
+        offset == TimeSpan.Zero ? "UTC" : $"UTC{(offset < TimeSpan.Zero ? "-" : "+")}{offset:hh\\:mm}";
+
+    private bool _serverOk;
+    private int _devicesConnected, _devicesTotal;
+    private int _tagsTotal, _tagsGood, _tagsBad;
+    private int _alarmsActive, _alarmsUnacked;
+
+    protected override void OnInitialized()
+    {
+        _clockTimer = new System.Threading.Timer(_ =>
+        {
+            _now = DateTime.Now;
+            InvokeAsync(StateHasChanged);
+        }, null, 1000, 1000);
+
+        _healthTimer = new System.Threading.Timer(_ => InvokeAsync(RefreshHealthAsync), null, 0, 5000);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var saved = await JS.InvokeAsync<string?>("localStorage.getItem", "hino-theme");
+            if (saved == "light" && _isDark) { _isDark = false; StateHasChanged(); }
+        }
+        catch { /* storage unavailable — keep default */ }
+    }
+
+    private Task ToggleThemeAsync() => OnDarkModeChanged(!_isDark);
+
+    // Single entry point for theme changes so every change (toggle or provider-driven)
+    // lands in localStorage consistently.
+    private async Task OnDarkModeChanged(bool isDark)
+    {
+        _isDark = isDark;
+        try { await JS.InvokeVoidAsync("localStorage.setItem", "hino-theme", _isDark ? "dark" : "light"); }
+        catch { }
+    }
+
+    private async Task RefreshHealthAsync()
+    {
+        try
+        {
+            var health = await Http.GetFromJsonAsync<List<HealthRow>>("api/health") ?? new();
+            var values = await Http.GetFromJsonAsync<List<TagSample>>("api/tags/values") ?? new();
+            var alarms = await Http.GetFromJsonAsync<AlarmSummary>("api/alarms/summary");
+            _devicesTotal = health.Count;
+            _devicesConnected = health.Count(h => h.State == DeviceState.Connected);
+            _tagsTotal = values.Count;
+            _tagsGood = values.Count(v => v.Quality == Quality.Good);
+            _tagsBad = values.Count(v => v.Quality == Quality.Bad);
+            _alarmsActive = alarms?.Active ?? 0;
+            _alarmsUnacked = alarms?.Unacknowledged ?? 0;
+            _serverOk = true;
+        }
+        catch
+        {
+            _serverOk = false;
+        }
+        StateHasChanged();
+    }
+
+    private sealed record HealthRow(string DeviceId, DeviceState State);
+
+    public void Dispose()
+    {
+        _clockTimer?.Dispose();
+        _healthTimer?.Dispose();
+    }
+
+    // Industrial control-room theme: cool neutrals, blue accent, compact 6px radius.
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#1d4ed8",
+            Secondary = "#0e7490",
+            Background = "#eef1f6",
+            Surface = "#ffffff",
+            AppbarBackground = "#0f1b2d",
+            AppbarText = "#e2e8f0",
+            DrawerBackground = "#f8fafc",
+            DrawerText = "#334155",
+            TextPrimary = "#0f172a",
+            TextSecondary = "#475569",
+            Success = "#15803d",
+            Warning = "#b45309",
+            Error = "#b91c1c",
+            LinesDefault = "#d7dde6",
+            TableLines = "#e4e8ef",
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#3b82f6",
+            Secondary = "#22d3ee",
+            Background = "#0b1220",
+            Surface = "#111c2f",
+            AppbarBackground = "#0b1220",
+            AppbarText = "#e2e8f0",
+            DrawerBackground = "#0e1728",
+            DrawerText = "#94a3b8",
+            TextPrimary = "#e2e8f0",
+            TextSecondary = "#94a3b8",
+            Success = "#22c55e",
+            Warning = "#f59e0b",
+            Error = "#ef4444",
+            LinesDefault = "#1e2c44",
+            TableLines = "#1a2740",
+            ActionDefault = "#94a3b8",
+        },
+        Typography = new Typography
+        {
+            Default = new DefaultTypography
+            {
+                FontFamily = new[] { "Segoe UI", "system-ui", "-apple-system", "Roboto", "Arial", "sans-serif" }
+            }
+        },
+        LayoutProperties = new LayoutProperties { DefaultBorderRadius = "6px", AppbarHeight = "52px" },
+    };
+}

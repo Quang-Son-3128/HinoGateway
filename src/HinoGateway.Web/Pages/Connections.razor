@@ -1,0 +1,317 @@
+@page "/connections"
+@page "/config"
+@using System.Net.Http.Json
+@using System.Text
+@using Microsoft.AspNetCore.Components.Forms
+@implements IDisposable
+@inject HttpClient Http
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>HinoGateway — Connections</PageTitle>
+
+<div class="page-head">
+    <h1>Connections</h1>
+    <MudSpacer />
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewDevice">New connection</MudButton>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download"
+               OnClick='() => Nav.NavigateTo("api/config/export", forceLoad: true)'>Export</MudButton>
+    <MudButton HtmlTag="label" for="importFile" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Upload">Import</MudButton>
+    <InputFile id="importFile" OnChange="OnImportFile" hidden accept=".hino,application/json" />
+    <MudTooltip Text="Delete the whole existing configuration before importing">
+        <MudSwitch T="bool" @bind-Value="_replaceOnImport" Color="Color.Warning" Label="replace" />
+    </MudTooltip>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PublishedWithChanges"
+               OnClick="ApplyAsync" Disabled="_busy">Apply to engine</MudButton>
+</div>
+
+<MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.65">
+    Each connection is one device/link the gateway polls. Tags are organised separately on the
+    <MudLink Href="tags">Tag Database</MudLink> page, where every tag picks the connection it reads from.
+</MudText>
+
+<MudPaper Elevation="0" Outlined Class="mb-4">
+    <MudTable Items="_devices" Dense Hover Elevation="0">
+        <HeaderContent>
+            <MudTh Style="width:8rem">Status</MudTh>
+            <MudTh>Connection Id</MudTh>
+            <MudTh>Driver</MudTh>
+            <MudTh>Endpoint</MudTh>
+            <MudTh Style="text-align:right">Scan (ms)</MudTh>
+            <MudTh Style="text-align:right">Tags</MudTh>
+            <MudTh Style="text-align:right">Errors</MudTh>
+            <MudTh Style="text-align:right">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            @{
+                var h = _health.GetValueOrDefault(context.Id);
+            }
+            <MudTd DataLabel="Status">
+                <span class="d-inline-flex align-center" style="gap:.4rem">
+                    <span class="led @StateLed(h?.State)"></span>
+                    <span class="mono" style="font-size:.75rem;opacity:.8">@(h?.State.ToString().ToUpperInvariant() ?? "—")</span>
+                </span>
+            </MudTd>
+            <MudTd DataLabel="Connection Id" Class="mono">@context.Id</MudTd>
+            <MudTd DataLabel="Driver">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Primary">@context.Driver</MudChip>
+            </MudTd>
+            <MudTd DataLabel="Endpoint">
+                <span class="mono" style="font-size:.8rem;opacity:.75">@Endpoint(context)</span>
+            </MudTd>
+            <MudTd DataLabel="Scan" Style="text-align:right" Class="mono">@context.ScanIntervalMs</MudTd>
+            <MudTd DataLabel="Tags" Style="text-align:right" Class="mono">@context.Tags.Count</MudTd>
+            <MudTd DataLabel="Errors" Style="text-align:right">
+                @if (h is not null && !string.IsNullOrEmpty(h.LastError) && h.State != DeviceState.Connected)
+                {
+                    <MudTooltip Text="@h.LastError">
+                        <span class="mono" style="color:var(--hino-bad);font-size:.8rem">@h.ErrorCount</span>
+                    </MudTooltip>
+                }
+                else
+                {
+                    <span class="mono" style="opacity:.5;font-size:.8rem">@(h?.ErrorCount ?? 0)</span>
+                }
+            </MudTd>
+            <MudTd DataLabel="Actions" Style="text-align:right">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary" OnClick="() => Edit(context)" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" />
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="opacity:.5">No connections configured.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@if (_edit is not null)
+{
+    <MudPaper Class="pa-4 mb-6" Elevation="0" Outlined Style="border-left:3px solid var(--mud-palette-primary)">
+        <MudText Typo="Typo.h6" Class="mb-3">
+            <MudIcon Icon="@(_isNew ? Icons.Material.Filled.Add : Icons.Material.Filled.Edit)" Size="Size.Small" Class="me-1" />
+            @(_isNew ? "New connection" : $"Edit {_edit.Id}")
+        </MudText>
+
+        <div class="d-flex flex-wrap" style="gap:1rem">
+            <MudTextField T="string" @bind-Value="_edit.Id" Label="Connection Id" Disabled="@(!_isNew)"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:14rem" />
+            <MudSelect T="string" @bind-Value="_edit.Driver" @bind-Value:after="OnDriverChanged" Label="Driver"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:12rem">
+                @foreach (var drv in _drivers)
+                {
+                    <MudSelectItem T="string" Value="@drv">@drv</MudSelectItem>
+                }
+            </MudSelect>
+            <MudNumericField T="int" @bind-Value="_edit.ScanIntervalMs" Label="Scan interval (ms)" Min="50"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:10rem" />
+        </div>
+
+        <MudText Typo="Typo.subtitle2" Class="mt-4 mb-1">Settings</MudText>
+        <MudSimpleTable Dense Bordered Elevation="0" Style="background:transparent">
+            <thead><tr><th style="width:16rem">Key</th><th>Value</th><th style="width:3rem"></th></tr></thead>
+            <tbody>
+                @foreach (var s in _settings)
+                {
+                    <tr>
+                        <td><MudTextField T="string" @bind-Value="s.Key" Margin="Margin.Dense" Variant="Variant.Text" Placeholder="Host" /></td>
+                        <td><MudTextField T="string" @bind-Value="s.Value" Margin="Margin.Dense" Variant="Variant.Text" Placeholder="127.0.0.1" /></td>
+                        <td><MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Error" OnClick="() => _settings.Remove(s)" /></td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => _settings.Add(new SettingRow())">Add setting</MudButton>
+        @if (_edit.Driver == "ModbusTCP")
+        {
+            <MudAlert Severity="Severity.Info" Dense Class="mt-2" Variant="Variant.Outlined">
+                Keys: <b>Host</b>, <b>Port</b> (502), <b>UnitId</b> (1), TimeoutMs, Retries, WordSwap.
+                Address: <code>40001</code> (holding reg 0), <code>30001</code> (input), <code>00001</code> (coil),
+                <code>10001</code> (discrete). A bare number like <code>3</code> = holding register 3.
+            </MudAlert>
+        }
+
+        <div class="d-flex mt-4" style="gap:.6rem">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsync" Disabled="_busy">Save</MudButton>
+            <MudButton Variant="Variant.Text" OnClick="() => _edit = null">Cancel</MudButton>
+        </div>
+    </MudPaper>
+}
+
+@code {
+    private List<DeviceDto> _devices = new();
+    private List<string> _drivers = new();
+    private Dictionary<string, DeviceHealth> _health = new();
+    private System.Threading.Timer? _healthTimer;
+    private DeviceDto? _edit;
+    private readonly List<SettingRow> _settings = new();
+    private bool _isNew;
+    private bool _busy;
+    private bool _replaceOnImport;
+
+    private sealed class SettingRow
+    {
+        public string Key { get; set; } = "";
+        public string Value { get; set; } = "";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _drivers = await Http.GetFromJsonAsync<List<string>>("api/config/drivers") ?? new();
+        await LoadDevicesAsync();
+        _healthTimer = new System.Threading.Timer(_ => InvokeAsync(RefreshHealthAsync), null, 0, 3000);
+    }
+
+    private async Task RefreshHealthAsync()
+    {
+        try
+        {
+            var rows = await Http.GetFromJsonAsync<List<DeviceHealth>>("api/health") ?? new();
+            _health = rows.ToDictionary(h => h.DeviceId);
+            StateHasChanged();
+        }
+        catch { /* server briefly unreachable — keep last known */ }
+    }
+
+    private static string StateLed(DeviceState? s) => s switch
+    {
+        DeviceState.Connected => "led-good",
+        DeviceState.Connecting => "led-warn",
+        DeviceState.Faulted => "led-bad",
+        _ => "led-idle",
+    };
+
+    // Compact endpoint summary for the table, e.g. "192.168.1.10:502 #1".
+    private static string Endpoint(DeviceDto d)
+    {
+        if (d.Driver == "ModbusTCP")
+        {
+            var host = d.Settings.GetValueOrDefault("Host", "?");
+            var port = d.Settings.GetValueOrDefault("Port", "502");
+            var unit = d.Settings.GetValueOrDefault("UnitId", "1");
+            return $"{host}:{port} #{unit}";
+        }
+        return d.Driver == "Simulator" ? "(internal)" : "";
+    }
+
+    public void Dispose() => _healthTimer?.Dispose();
+
+    private async Task LoadDevicesAsync()
+    {
+        _devices = await Http.GetFromJsonAsync<List<DeviceDto>>("api/config/devices") ?? new();
+    }
+
+    private void NewDevice()
+    {
+        _isNew = true;
+        _edit = new DeviceDto { Driver = _drivers.FirstOrDefault() ?? "Simulator", ScanIntervalMs = 1000 };
+        SyncSettingsFromEdit();
+        OnDriverChanged();
+    }
+
+    private void SyncSettingsFromEdit()
+    {
+        _settings.Clear();
+        foreach (var kv in _edit!.Settings)
+            _settings.Add(new SettingRow { Key = kv.Key, Value = kv.Value });
+    }
+
+    private void OnDriverChanged()
+    {
+        if (_edit?.Driver == "ModbusTCP" && !_settings.Any(s => !string.IsNullOrWhiteSpace(s.Key)))
+        {
+            _settings.Clear();
+            _settings.Add(new SettingRow { Key = "Host", Value = "127.0.0.1" });
+            _settings.Add(new SettingRow { Key = "Port", Value = "502" });
+            _settings.Add(new SettingRow { Key = "UnitId", Value = "1" });
+            _settings.Add(new SettingRow { Key = "TimeoutMs", Value = "1000" });
+        }
+    }
+
+    private void Edit(DeviceDto d)
+    {
+        _isNew = false;
+        _edit = new DeviceDto
+        {
+            Id = d.Id,
+            Driver = d.Driver,
+            ScanIntervalMs = d.ScanIntervalMs,
+            Settings = new(d.Settings),
+        };
+        SyncSettingsFromEdit();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_edit is null) return;
+        if (string.IsNullOrWhiteSpace(_edit.Id)) { Snackbar.Add("Connection Id is required.", Severity.Warning); return; }
+
+        _edit.Settings = _settings
+            .Where(s => !string.IsNullOrWhiteSpace(s.Key))
+            .ToDictionary(s => s.Key.Trim(), s => s.Value ?? "");
+
+        _busy = true;
+        try
+        {
+            var resp = await Http.PutAsJsonAsync($"api/config/devices/{_edit.Id.Trim()}", _edit);
+            if (!resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"Save failed: {await resp.Content.ReadAsStringAsync()}", Severity.Error);
+                return;
+            }
+            _edit = null;
+            await LoadDevicesAsync();
+            Snackbar.Add("Saved. Click \"Apply to engine\" to make it live.", Severity.Success);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteAsync(DeviceDto d)
+    {
+        _busy = true;
+        try
+        {
+            var resp = await Http.DeleteAsync($"api/config/devices/{d.Id}");
+            if (!resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add(await resp.Content.ReadAsStringAsync(), Severity.Warning);
+                return;
+            }
+            await LoadDevicesAsync();
+            Snackbar.Add($"Deleted {d.Id}. Click \"Apply to engine\" to make it live.", Severity.Info);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task OnImportFile(InputFileChangeEventArgs e)
+    {
+        if (e.FileCount == 0) return;
+        _busy = true;
+        try
+        {
+            using var reader = new StreamReader(e.File.OpenReadStream(20 * 1024 * 1024));
+            var json = await reader.ReadToEndAsync();
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var resp = await Http.PostAsync($"api/config/import?replace={_replaceOnImport.ToString().ToLowerInvariant()}", content);
+            if (!resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"Import failed: {await resp.Content.ReadAsStringAsync()}", Severity.Error);
+                return;
+            }
+            var result = await resp.Content.ReadFromJsonAsync<ImportResult>();
+            await LoadDevicesAsync();
+            Snackbar.Add($"Imported {result?.Devices ?? 0} connection(s), {result?.Groups ?? 0} folder(s), {result?.Tags ?? 0} tag(s), {result?.Alarms ?? 0} alarm(s). Click \"Apply to engine\".", Severity.Success);
+        }
+        finally { _busy = false; }
+    }
+
+    private sealed record ImportResult(int Devices, int Groups, int Tags, int Alarms, int Removed);
+
+    private async Task ApplyAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Http.PostAsync("api/config/reload", null);
+            Snackbar.Add("Applied — engine reloaded with the current configuration.", Severity.Success);
+        }
+        finally { _busy = false; }
+    }
+}

@@ -1,0 +1,460 @@
+@page "/tags"
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService Dialog
+@inject NavigationManager Nav
+
+<PageTitle>HinoGateway — Tags</PageTitle>
+
+<div class="page-head">
+    <h1>Tag Database</h1>
+    <MudSpacer />
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="NewFolder">New folder</MudButton>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewTag" Disabled="_devices.Count == 0">New tag</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PublishedWithChanges"
+               OnClick="ApplyAsync" Disabled="_busy">Apply to engine</MudButton>
+</div>
+
+@if (_devices.Count == 0)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-3" Variant="Variant.Outlined">
+        No connections yet — create one on the <MudLink Href="connections">Connections</MudLink> page first;
+        every tag must read from a connection.
+    </MudAlert>
+}
+
+<MudGrid Spacing="3">
+    <MudItem xs="12" md="4" lg="3">
+        <MudPaper Class="pa-2" Elevation="0" Outlined>
+            <MudText Typo="Typo.caption" Class="hino-nav-section">Folders</MudText>
+            <MudTreeView T="string" Items="_tree" Hover Dense
+                         SelectedValue="_selectedGroupId" SelectedValueChanged="OnSelectGroup">
+                <ItemTemplate>
+                    <MudTreeViewItem Value="@context.Value" Items="@context.Children" Text="@context.Text"
+                                     Icon="@context.Icon" @bind-Expanded="@context.Expanded" />
+                </ItemTemplate>
+            </MudTreeView>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="8" lg="9">
+        <div class="d-flex align-center mb-2" style="gap:.4rem">
+            <MudIcon Icon="@(_selectedGroupId == RootId ? Icons.Material.Filled.AccountTree : Icons.Material.Filled.Folder)"
+                     Size="Size.Small" Color="Color.Primary" />
+            <MudText Typo="Typo.subtitle1" Style="font-family:monospace">@CurrentPathLabel</MudText>
+            <MudSpacer />
+            @if (_selectedGroupId != RootId)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.DriveFileRenameOutline"
+                           OnClick="EditFolder">Rename / move</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
+                           OnClick="DeleteFolderAsync">Delete folder</MudButton>
+            }
+        </div>
+
+        @if (_folderEdit is not null)
+        {
+            <MudPaper Class="pa-4 mb-3" Elevation="0" Outlined Style="border-left:3px solid var(--mud-palette-primary)">
+                <MudText Typo="Typo.h6" Class="mb-3">@(_folderIsNew ? "New folder" : $"Edit folder '{_folderEdit.Name}'")</MudText>
+                <div class="d-flex flex-wrap align-center" style="gap:1rem">
+                    <MudTextField T="string" @bind-Value="_folderEdit.Name" Label="Folder name"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:14rem" />
+                    <MudSelect T="string" @bind-Value="_folderParentId" Label="Inside"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:16rem">
+                        <MudSelectItem T="string" Value="@RootId">(root)</MudSelectItem>
+                        @foreach (var g in FolderChoicesExcludingSubtree(_folderIsNew ? null : _folderEdit.Id))
+                        {
+                            <MudSelectItem T="string" Value="@g.Id">@GroupPath(g.Id)</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                               OnClick="SaveFolderAsync" Disabled="_busy">Save</MudButton>
+                    <MudButton Variant="Variant.Text" OnClick="() => _folderEdit = null">Cancel</MudButton>
+                </div>
+            </MudPaper>
+        }
+
+        <MudPaper Elevation="0" Outlined>
+            <MudTable Items="TagsInSelectedGroup" Dense Hover Elevation="0" RowStyleFunc="TagRowStyle">
+                <HeaderContent>
+                    <MudTh>Name</MudTh>
+                    <MudTh>Connection</MudTh>
+                    <MudTh>Address</MudTh>
+                    <MudTh>Type</MudTh>
+                    <MudTh>Unit</MudTh>
+                    <MudTh>Description</MudTh>
+                    <MudTh Style="text-align:right">Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Name" Class="mono">@context.Name</MudTd>
+                    <MudTd DataLabel="Connection"><MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Primary">@context.DeviceId</MudChip></MudTd>
+                    <MudTd DataLabel="Address" Class="mono">@context.Address</MudTd>
+                    <MudTd DataLabel="Type"><span class="mono" style="font-size:.8rem;opacity:.8">@context.DataType</span></MudTd>
+                    <MudTd DataLabel="Unit">@context.Unit</MudTd>
+                    <MudTd DataLabel="Description" Style="opacity:.7;font-size:.85rem">@context.Description</MudTd>
+                    <MudTd DataLabel="Actions" Style="text-align:right">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary" OnClick="() => EditTag(context)" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteTagAsync(context)" />
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent><MudText Class="pa-4" Style="opacity:.5">No tags in this folder.</MudText></NoRecordsContent>
+            </MudTable>
+        </MudPaper>
+
+        @if (_tagEdit is not null)
+        {
+            <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined Style="border-left:3px solid var(--mud-palette-primary)">
+                <MudText Typo="Typo.h6" Class="mb-3">
+                    <MudIcon Icon="@(_tagIsNew ? Icons.Material.Filled.Add : Icons.Material.Filled.Edit)" Size="Size.Small" Class="me-1" />
+                    @(_tagIsNew ? "New tag" : $"Edit {_tagEdit.Name}")
+                </MudText>
+                <div class="d-flex flex-wrap" style="gap:1rem">
+                    <MudTextField T="string" @bind-Value="_tagEdit.Name" Label="Name"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:12rem" />
+                    <MudSelect T="string" @bind-Value="_tagGroupId" Label="Folder"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:14rem">
+                        <MudSelectItem T="string" Value="@RootId">(root)</MudSelectItem>
+                        @foreach (var g in _groups.OrderBy(x => GroupPath(x.Id)))
+                        {
+                            <MudSelectItem T="string" Value="@g.Id">@GroupPath(g.Id)</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudSelect T="string" @bind-Value="_tagEdit.DeviceId" Label="Connection"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:12rem">
+                        @foreach (var d in _devices)
+                        {
+                            <MudSelectItem T="string" Value="@d.Id">@d.Id (@d.Driver)</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudTextField T="string" @bind-Value="_tagEdit.Address" Label="Address" Placeholder="40001 / sine"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:10rem" />
+                    <MudSelect T="DataType" @bind-Value="_tagEdit.DataType" Label="Data type"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:9rem">
+                        @foreach (var dt in Enum.GetValues<DataType>())
+                        {
+                            <MudSelectItem T="DataType" Value="@dt">@dt</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudTextField T="string" @bind-Value="_tagEdit.Unit" Label="Unit"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:6rem" />
+                    <MudTextField T="string" @bind-Value="_tagEdit.Description" Label="Description" Placeholder="What this tag measures"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:18rem;flex-grow:1" />
+                    <MudNumericField T="double" @bind-Value="_tagEdit.Scale" Label="Scale" HideSpinButtons
+                                     Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:7rem" />
+                    <MudNumericField T="double" @bind-Value="_tagEdit.Offset" Label="Offset" HideSpinButtons
+                                     Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:7rem" />
+                </div>
+                <MudText Typo="Typo.caption" Color="Color.Tertiary" Class="mt-2 d-block">
+                    Runtime tag id: <code>@PreviewPath</code>
+                </MudText>
+                <div class="d-flex mt-3" style="gap:.6rem">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                               OnClick="SaveTagAsync" Disabled="_busy">Save</MudButton>
+                    <MudButton Variant="Variant.Text" OnClick="() => _tagEdit = null">Cancel</MudButton>
+                </div>
+            </MudPaper>
+        }
+    </MudItem>
+</MudGrid>
+
+@code {
+    // MudSelect/TreeView bind string (not string?) most ergonomically, so the root is a sentinel.
+    private const string RootId = "";
+
+    private List<TagGroupDto> _groups = new();
+    private List<TagDto> _tags = new();
+    private List<DeviceDto> _devices = new();
+    private List<TreeItemData<string>> _tree = new();
+    private string _selectedGroupId = RootId;
+
+    private TagGroupDto? _folderEdit;
+    private string _folderParentId = RootId;
+    private bool _folderIsNew;
+
+    private TagDto? _tagEdit;
+    private string _tagGroupId = RootId;
+    private bool _tagIsNew;
+
+    private bool _busy;
+    private string? _highlightTagId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        SelectTagFromQuery();
+    }
+
+    // Deep link from the Live page: /tags?select=<runtime tag path> jumps to the
+    // tag's folder and highlights its row.
+    private void SelectTagFromQuery()
+    {
+        var query = Nav.ToAbsoluteUri(Nav.Uri).Query.TrimStart('?');
+        foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var idx = pair.IndexOf('=');
+            if (idx <= 0 || !pair[..idx].Equals("select", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var path = Uri.UnescapeDataString(pair[(idx + 1)..].Replace('+', ' '));
+            var tag = _tags.FirstOrDefault(t => t.Path == path);
+            if (tag is not null)
+            {
+                _selectedGroupId = tag.GroupId ?? RootId;
+                _highlightTagId = tag.Id;
+            }
+            return;
+        }
+    }
+
+    private string TagRowStyle(TagDto t, int _) =>
+        t.Id == _highlightTagId
+            ? "background:rgba(59,130,246,.16);box-shadow:inset 3px 0 0 var(--mud-palette-primary)"
+            : "";
+
+    private async Task LoadAsync()
+    {
+        _groups = await Http.GetFromJsonAsync<List<TagGroupDto>>("api/config/groups") ?? new();
+        _tags = await Http.GetFromJsonAsync<List<TagDto>>("api/config/tags") ?? new();
+        _devices = await Http.GetFromJsonAsync<List<DeviceDto>>("api/config/devices") ?? new();
+        if (_selectedGroupId != RootId && _groups.All(g => g.Id != _selectedGroupId))
+            _selectedGroupId = RootId;
+        BuildTree();
+    }
+
+    // --- tree ----------------------------------------------------------------
+
+    private void BuildTree()
+    {
+        TreeItemData<string> Node(TagGroupDto g) => new()
+        {
+            Value = g.Id,
+            Text = g.Name,
+            Icon = Icons.Material.Filled.Folder,
+            Expanded = true,
+            Children = _groups.Where(c => c.ParentId == g.Id).OrderBy(c => c.Name)
+                              .Select(Node).Cast<TreeItemData<string>>().ToList(),
+        };
+
+        _tree = new()
+        {
+            new TreeItemData<string>
+            {
+                Value = RootId,
+                Text = "Tags",
+                Icon = Icons.Material.Filled.AccountTree,
+                Expanded = true,
+                Children = _groups.Where(g => g.ParentId is null).OrderBy(g => g.Name)
+                                  .Select(Node).Cast<TreeItemData<string>>().ToList(),
+            },
+        };
+    }
+
+    private void OnSelectGroup(string? value)
+    {
+        _selectedGroupId = value ?? RootId;
+        _folderEdit = null;
+        _tagEdit = null;
+        _highlightTagId = null;
+    }
+
+    private string GroupPath(string groupId)
+    {
+        var byId = _groups.ToDictionary(g => g.Id);
+        var parts = new List<string>();
+        var visited = new HashSet<string>();
+        for (var g = byId.GetValueOrDefault(groupId); g is not null && visited.Add(g.Id);
+             g = g.ParentId is null ? null : byId.GetValueOrDefault(g.ParentId))
+        {
+            parts.Insert(0, g.Name);
+        }
+        return string.Join("/", parts);
+    }
+
+    private string CurrentPathLabel => _selectedGroupId == RootId ? "(root)" : GroupPath(_selectedGroupId);
+
+    private IEnumerable<TagGroupDto> FolderChoicesExcludingSubtree(string? excludeId)
+    {
+        if (excludeId is null)
+            return _groups.OrderBy(g => GroupPath(g.Id));
+
+        var excluded = new HashSet<string> { excludeId };
+        bool grew;
+        do
+        {
+            grew = false;
+            foreach (var g in _groups)
+            {
+                if (g.ParentId is not null && excluded.Contains(g.ParentId) && excluded.Add(g.Id))
+                    grew = true;
+            }
+        } while (grew);
+        return _groups.Where(g => !excluded.Contains(g.Id)).OrderBy(g => GroupPath(g.Id));
+    }
+
+    // --- folder CRUD ---------------------------------------------------------
+
+    private void NewFolder()
+    {
+        _folderIsNew = true;
+        _folderEdit = new TagGroupDto { Id = Guid.NewGuid().ToString("N"), Name = "" };
+        _folderParentId = _selectedGroupId;
+        _tagEdit = null;
+    }
+
+    private void EditFolder()
+    {
+        var g = _groups.FirstOrDefault(x => x.Id == _selectedGroupId);
+        if (g is null) return;
+        _folderIsNew = false;
+        _folderEdit = new TagGroupDto { Id = g.Id, ParentId = g.ParentId, Name = g.Name };
+        _folderParentId = g.ParentId ?? RootId;
+        _tagEdit = null;
+    }
+
+    private async Task SaveFolderAsync()
+    {
+        if (_folderEdit is null) return;
+        if (string.IsNullOrWhiteSpace(_folderEdit.Name)) { Snackbar.Add("Folder name is required.", Severity.Warning); return; }
+        _folderEdit.ParentId = _folderParentId == RootId ? null : _folderParentId;
+
+        _busy = true;
+        try
+        {
+            var resp = await Http.PutAsJsonAsync($"api/config/groups/{_folderEdit.Id}", _folderEdit);
+            if (!resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"Save failed: {await resp.Content.ReadAsStringAsync()}", Severity.Error);
+                return;
+            }
+            _selectedGroupId = _folderEdit.Id;
+            _folderEdit = null;
+            await LoadAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteFolderAsync()
+    {
+        var path = CurrentPathLabel;
+        var tagCount = _tags.Count(t => IsInSubtree(t.GroupId, _selectedGroupId));
+        var ok = await Dialog.ShowMessageBoxAsync("Delete folder",
+            $"Delete '{path}' including all sub-folders and {tagCount} tag(s) inside?",
+            yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return;
+
+        _busy = true;
+        try
+        {
+            await Http.DeleteAsync($"api/config/groups/{_selectedGroupId}");
+            _selectedGroupId = RootId;
+            await LoadAsync();
+            Snackbar.Add($"Deleted '{path}'. Click \"Apply to engine\" to make it live.", Severity.Info);
+        }
+        finally { _busy = false; }
+    }
+
+    private bool IsInSubtree(string? groupId, string rootId)
+    {
+        var byId = _groups.ToDictionary(g => g.Id);
+        var visited = new HashSet<string>();
+        for (var id = groupId; id is not null && visited.Add(id);
+             id = byId.GetValueOrDefault(id)?.ParentId)
+        {
+            if (id == rootId)
+                return true;
+        }
+        return false;
+    }
+
+    // --- tag CRUD ------------------------------------------------------------
+
+    private IEnumerable<TagDto> TagsInSelectedGroup =>
+        _tags.Where(t => (t.GroupId ?? RootId) == _selectedGroupId).OrderBy(t => t.Name);
+
+    private void NewTag()
+    {
+        _tagIsNew = true;
+        _tagEdit = new TagDto
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            DeviceId = _devices.FirstOrDefault()?.Id ?? "",
+            Name = "",
+            Address = "",
+        };
+        _tagGroupId = _selectedGroupId;
+        _folderEdit = null;
+    }
+
+    private void EditTag(TagDto t)
+    {
+        _tagIsNew = false;
+        _tagEdit = new TagDto
+        {
+            Id = t.Id, GroupId = t.GroupId, DeviceId = t.DeviceId, Name = t.Name,
+            Address = t.Address, DataType = t.DataType, Unit = t.Unit, Description = t.Description,
+            Scale = t.Scale, Offset = t.Offset,
+        };
+        _tagGroupId = t.GroupId ?? RootId;
+        _folderEdit = null;
+    }
+
+    private string PreviewPath
+    {
+        get
+        {
+            if (_tagEdit is null) return "";
+            var folder = _tagGroupId == RootId ? "" : GroupPath(_tagGroupId);
+            var name = string.IsNullOrWhiteSpace(_tagEdit.Name) ? "<name>" : _tagEdit.Name.Trim();
+            return folder.Length == 0 ? name : $"{folder}/{name}";
+        }
+    }
+
+    private async Task SaveTagAsync()
+    {
+        if (_tagEdit is null) return;
+        if (string.IsNullOrWhiteSpace(_tagEdit.Name)) { Snackbar.Add("Tag name is required.", Severity.Warning); return; }
+        if (string.IsNullOrWhiteSpace(_tagEdit.DeviceId)) { Snackbar.Add("Pick the connection this tag reads from.", Severity.Warning); return; }
+        _tagEdit.GroupId = _tagGroupId == RootId ? null : _tagGroupId;
+
+        _busy = true;
+        try
+        {
+            var resp = await Http.PutAsJsonAsync($"api/config/tags/{_tagEdit.Id}", _tagEdit);
+            if (!resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"Save failed: {await resp.Content.ReadAsStringAsync()}", Severity.Error);
+                return;
+            }
+            _tagEdit = null;
+            await LoadAsync();
+            Snackbar.Add("Saved. Click \"Apply to engine\" to make it live.", Severity.Success);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteTagAsync(TagDto t)
+    {
+        _busy = true;
+        try
+        {
+            await Http.DeleteAsync($"api/config/tags/{t.Id}");
+            await LoadAsync();
+            Snackbar.Add($"Deleted '{t.Path}'. Click \"Apply to engine\" to make it live.", Severity.Info);
+        }
+        finally { _busy = false; }
+    }
+
+    // --- apply ---------------------------------------------------------------
+
+    private async Task ApplyAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Http.PostAsync("api/config/reload", null);
+            Snackbar.Add("Applied — engine reloaded with the current configuration.", Severity.Success);
+        }
+        finally { _busy = false; }
+    }
+}

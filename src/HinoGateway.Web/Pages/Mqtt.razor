@@ -1,0 +1,195 @@
+@page "/mqtt"
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+
+<MudText Typo="Typo.h5" Class="mb-1">MQTT Northbound</MudText>
+<MudText Typo="Typo.body2" Class="mb-4" Style="opacity:.65">
+    Publish tag updates to an upstream MQTT broker with batching and a durable disk spool.
+</MudText>
+
+<MudPaper Outlined Elevation="0" Class="pa-4 mb-4">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" sm="3">
+            <MudSwitch T="bool" @bind-Value="_options.Enabled" Label="Enabled" Color="Color.Primary" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="5">
+            <MudTextField T="string" @bind-Value="_options.Broker" Label="Broker host" Required
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" sm="3" md="2">
+            <MudNumericField T="int" @bind-Value="_options.Port" Label="Port" Min="1" Max="65535"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" sm="3" md="2">
+            <MudSwitch T="bool" @bind-Value="_options.UseTls" Label="TLS" Color="Color.Primary" />
+        </MudItem>
+
+        <MudItem xs="12" sm="6">
+            <MudTextField T="string" @bind-Value="_options.ClientId" Label="Client ID" Required
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <MudTextField T="string" @bind-Value="_options.PublishTopic" Label="Publish topic" Required
+                          HelperText="Wildcards # and + are not allowed for publishing."
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <MudTextField T="string" @bind-Value="_options.Username" Label="Username"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <MudTextField T="string" @bind-Value="_options.Password" Label="Password" InputType="InputType.Password"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+
+        <MudItem xs="6" sm="3">
+            <MudNumericField T="int" @bind-Value="_options.QoS" Label="QoS" Min="0" Max="2"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudSwitch T="bool" @bind-Value="_options.Retain" Label="Retain" Color="Color.Primary" />
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudNumericField T="int" @bind-Value="_options.BatchIntervalMs" Label="Batch interval (ms)"
+                             Min="50" Max="60000" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudNumericField T="int" @bind-Value="_options.QueueCapacity" Label="Input queue (batches)"
+                             Min="64" Max="100000" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+
+        <MudItem xs="12" sm="4">
+            <MudNumericField T="long" @bind-Value="_spoolMb" Label="Disk spool (MB)"
+                             Min="1" Max="10240" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" sm="4">
+            <MudNumericField T="int" @bind-Value="_options.ReconnectMinMs" Label="Reconnect minimum (ms)"
+                             Min="100" Max="60000" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" sm="4">
+            <MudNumericField T="int" @bind-Value="_options.ReconnectMaxMs" Label="Reconnect maximum (ms)"
+                             Min="100" Max="300000" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+    </MudGrid>
+
+    <MudAlert Severity="Severity.Info" Dense Class="mt-3">
+        Each batch keeps the latest value per tag. It is committed to the disk spool before publish,
+        then removed only after MQTT acknowledges it.
+    </MudAlert>
+
+    <MudStack Row Class="mt-4">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="SaveApplyAsync" Disabled="_busy">Save &amp; Apply</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="LoadAsync" Disabled="_busy">Refresh</MudButton>
+    </MudStack>
+</MudPaper>
+
+@if (_status is not null)
+{
+    <MudPaper Outlined Elevation="0" Class="pa-4">
+        <div class="d-flex align-center flex-wrap" style="gap:.65rem">
+            <MudChip T="string" Size="Size.Small" Color="@StatusColor" Variant="Variant.Filled">
+                @StatusLabel
+            </MudChip>
+            <MudText Typo="Typo.body2" Class="mono">@_status.Endpoint</MudText>
+            <MudText Typo="Typo.body2" Style="opacity:.65">topic @_status.Topic</MudText>
+        </div>
+
+        <MudGrid Spacing="2" Class="mt-2">
+            <MudItem xs="6" sm="3"><MudText Typo="Typo.caption">Published batches</MudText><MudText Typo="Typo.h6">@_status.PublishedBatches</MudText></MudItem>
+            <MudItem xs="6" sm="3"><MudText Typo="Typo.caption">Published samples</MudText><MudText Typo="Typo.h6">@_status.PublishedSamples</MudText></MudItem>
+            <MudItem xs="6" sm="3"><MudText Typo="Typo.caption">Pending batches</MudText><MudText Typo="Typo.h6">@_status.PendingBatches</MudText></MudItem>
+            <MudItem xs="6" sm="3"><MudText Typo="Typo.caption">Pending data</MudText><MudText Typo="Typo.h6">@FormatBytes(_status.PendingBytes)</MudText></MudItem>
+        </MudGrid>
+
+        <MudText Typo="Typo.caption" Class="mt-3" Style="display:block;opacity:.65">
+            Last connected: @FormatInstant(_status.LastConnectedAt) · Last published: @FormatInstant(_status.LastPublishedAt)
+            · Input drops: @_status.DroppedInputBatches · Spool drops: @_status.DroppedSpoolBatches
+        </MudText>
+        @if (!string.IsNullOrWhiteSpace(_status.LastError))
+        {
+            <MudAlert Severity="Severity.Error" Dense Class="mt-3">@_status.LastError</MudAlert>
+        }
+    </MudPaper>
+}
+
+@code {
+    private MqttPublisherOptions _options = new();
+    private MqttPublisherStatus? _status;
+    private long _spoolMb = 256;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        try
+        {
+            _options = await Http.GetFromJsonAsync<MqttPublisherOptions>("api/mqtt") ?? new();
+            _spoolMb = Math.Max(1, _options.MaxSpoolBytes / 1024 / 1024);
+            _status = await Http.GetFromJsonAsync<MqttPublisherStatus>("api/mqtt/status");
+        }
+        catch (Exception ex) when (!ApiResponseErrors.IsUnauthorized(ex))
+        {
+            Snackbar.Add($"Could not load MQTT configuration: {ex.Message}", Severity.Error);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveApplyAsync()
+    {
+        _busy = true;
+        try
+        {
+            _options.Broker = _options.Broker?.Trim() ?? "";
+            _options.ClientId = _options.ClientId?.Trim() ?? "";
+            _options.PublishTopic = _options.PublishTopic?.Trim() ?? "";
+            _options.MaxSpoolBytes = checked(_spoolMb * 1024 * 1024);
+
+            var saved = await Http.PutAsJsonAsync("api/mqtt", _options);
+            if (!saved.IsSuccessStatusCode)
+            {
+                Snackbar.Add(await ApiResponseErrors.ReadAsync(saved), Severity.Error);
+                return;
+            }
+
+            var applied = await Http.PostAsync("api/mqtt/apply", null);
+            if (!applied.IsSuccessStatusCode)
+            {
+                Snackbar.Add(await ApiResponseErrors.ReadAsync(applied), Severity.Error);
+                return;
+            }
+
+            _status = await applied.Content.ReadFromJsonAsync<MqttPublisherStatus>();
+            Snackbar.Add("MQTT configuration saved and applied", Severity.Success);
+        }
+        catch (Exception ex) when (!ApiResponseErrors.IsUnauthorized(ex))
+        {
+            Snackbar.Add($"Could not apply MQTT configuration: {ex.Message}", Severity.Error);
+        }
+        finally { _busy = false; }
+    }
+
+    private Color StatusColor => _status switch
+    {
+        { Connected: true } => Color.Success,
+        { Enabled: true } => Color.Warning,
+        _ => Color.Default,
+    };
+
+    private string StatusLabel => _status switch
+    {
+        { Connected: true } => "Connected",
+        { Enabled: true, Running: true } => "Retrying",
+        { Enabled: true } => "Stopped",
+        _ => "Disabled",
+    };
+
+    private static string FormatBytes(long value) => value >= 1024 * 1024
+        ? $"{value / 1024d / 1024d:0.##} MB" : $"{value / 1024d:0.##} KB";
+
+    private static string FormatInstant(DateTimeOffset? value) =>
+        value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "—";
+}

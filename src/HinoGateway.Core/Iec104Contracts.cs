@@ -112,6 +112,22 @@ public sealed class Iec104ServerOptions
     public bool AllowCommands { get; set; } = true;
 
     /// <summary>
+    /// How many commands may be waiting to reach their devices at once. A control centre can issue
+    /// setpoints faster than a serial link can carry them; beyond this the gateway refuses rather
+    /// than queueing work it will never get through, because a command executed minutes late is
+    /// worse than one that was visibly rejected.
+    ///
+    /// <para>Reconstructed 2026-08-10; the default is the value in the surviving project export.</para>
+    /// </summary>
+    public int CommandQueueCapacity { get; set; } = 256;
+
+    /// <summary>
+    /// How long one command may take on the wire before the control centre is told it failed. Must
+    /// be shorter than the centre's own patience, or it will re-send a command that is still running.
+    /// </summary>
+    public int CommandTimeoutMs { get; set; } = 10000;
+
+    /// <summary>
     /// Accept C_CS_NA_1 clock synchronisation. The offset is recorded and reported; the gateway does
     /// not set the machine clock (that belongs to the operating system, and silently jumping a
     /// gateway's clock would corrupt every timestamp it has already produced).

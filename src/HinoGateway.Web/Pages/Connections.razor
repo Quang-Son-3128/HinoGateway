@@ -309,9 +309,64 @@
         _busy = true;
         try
         {
-            await Http.PostAsync("api/config/reload", null);
-            Snackbar.Add("Applied — engine reloaded with the current configuration.", Severity.Success);
+            var response = await Http.PostAsync("api/config/reload", null);
+            if (!response.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"Apply failed: {await ApiResponseErrors.ReadAsync(response)}", Severity.Error);
+                return;
+            }
+            ReportApply(Snackbar, await response.Content.ReadFromJsonAsync<ApplyResult>());
         }
         finally { _busy = false; }
+    }
+
+    /// <summary>
+    /// What the engine did with the configuration. Reconstructed 2026-08-10; mirrors
+    /// <c>EngineApplyResult</c> on the server.
+    /// </summary>
+    public sealed class ApplyResult
+    {
+        public int Started { get; set; }
+        public List<RejectedConnection> Rejected { get; set; } = new();
+        public List<DroppedTag> DroppedTags { get; set; } = new();
+
+        public sealed class RejectedConnection
+        {
+            public string DeviceId { get; set; } = "";
+            public string? LastError { get; set; }
+        }
+
+        public sealed class DroppedTag
+        {
+            public string DeviceId { get; set; } = "";
+            public string TagId { get; set; } = "";
+            public string Reason { get; set; } = "";
+        }
+    }
+
+    /// <summary>
+    /// Say what actually happened, not "Applied".
+    ///
+    /// <para>
+    /// An apply can succeed as an HTTP call while refusing a connection or dropping a tag, and an
+    /// unconditional green message taught operators to ignore the one screen that would have told
+    /// them a tag stopped being read. Shared with the Tags page so both report it the same way.
+    /// </para>
+    /// </summary>
+    public static void ReportApply(ISnackbar snackbar, ApplyResult? result)
+    {
+        if (result is null)
+        {
+            snackbar.Add("Applied.", Severity.Success);
+            return;
+        }
+
+        foreach (var rejected in result.Rejected)
+            snackbar.Add($"Connection '{rejected.DeviceId}' is not running: {rejected.LastError}", Severity.Error);
+        foreach (var dropped in result.DroppedTags)
+            snackbar.Add($"Tag '{dropped.TagId}' was dropped: {dropped.Reason}", Severity.Warning);
+
+        if (result.Rejected.Count == 0 && result.DroppedTags.Count == 0)
+            snackbar.Add($"Applied — {result.Started} connection(s) running.", Severity.Success);
     }
 }

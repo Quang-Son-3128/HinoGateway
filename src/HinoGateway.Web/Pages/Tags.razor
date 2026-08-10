@@ -11,7 +11,7 @@
     <h1>Tag Database</h1>
     <MudSpacer />
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="NewFolder">New folder</MudButton>
-    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewTag" Disabled="_devices.Count == 0">New tag</MudButton>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewTag">New tag</MudButton>
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PublishedWithChanges"
                OnClick="ApplyAsync" Disabled="_busy">Apply to engine</MudButton>
 </div>
@@ -19,8 +19,8 @@
 @if (_devices.Count == 0)
 {
     <MudAlert Severity="Severity.Info" Class="mb-3" Variant="Variant.Outlined">
-        No connections yet — create one on the <MudLink Href="connections">Connections</MudLink> page first;
-        every tag must read from a connection.
+        No connections yet — create one on the <MudLink Href="connections">Connections</MudLink> page to read
+        values from a device. Memory and expression tags need no connection and can be created right away.
     </MudAlert>
 }
 
@@ -79,19 +79,48 @@
             <MudTable Items="TagsInSelectedGroup" Dense Hover Elevation="0" RowStyleFunc="TagRowStyle">
                 <HeaderContent>
                     <MudTh>Name</MudTh>
+                    <MudTh>Kind</MudTh>
                     <MudTh>Connection</MudTh>
-                    <MudTh>Address</MudTh>
+                    <MudTh>Source</MudTh>
                     <MudTh>Type</MudTh>
                     <MudTh>Unit</MudTh>
+                    <MudTh>Scan</MudTh>
                     <MudTh>Description</MudTh>
                     <MudTh Style="text-align:right">Actions</MudTh>
                 </HeaderContent>
                 <RowTemplate>
                     <MudTd DataLabel="Name" Class="mono">@context.Name</MudTd>
-                    <MudTd DataLabel="Connection"><MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Primary">@context.DeviceId</MudChip></MudTd>
-                    <MudTd DataLabel="Address" Class="mono">@context.Address</MudTd>
+                    <MudTd DataLabel="Kind">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@KindColour(context.Kind)">@KindLabel(context.Kind)</MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Connection">
+                        @if (context.Kind == TagKind.Device)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Primary">@context.DeviceId</MudChip>
+                        }
+                        else
+                        {
+                            <span style="opacity:.35">—</span>
+                        }
+                    </MudTd>
+                    @* One column, three meanings: the address read, the formula computed, or the value held. *@
+                    <MudTd DataLabel="Source" Class="mono" Style="max-width:22rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                        <MudTooltip Text="@SourceText(context)"><span>@SourceText(context)</span></MudTooltip>
+                    </MudTd>
                     <MudTd DataLabel="Type"><span class="mono" style="font-size:.8rem;opacity:.8">@context.DataType</span></MudTd>
                     <MudTd DataLabel="Unit">@context.Unit</MudTd>
+                    <MudTd DataLabel="Scan">
+                        @if (context.ScanIntervalMs > 0)
+                        {
+                            <MudTooltip Text="This tag has a rate of its own; the rest follow the connection.">
+                                <span class="mono" style="font-size:.78rem;color:var(--hino-warn)">@FormatRate(context.ScanIntervalMs)</span>
+                            </MudTooltip>
+                        }
+                        else
+                        {
+                            <span style="opacity:.35;font-size:.78rem">—</span>
+                        }
+                    </MudTd>
                     <MudTd DataLabel="Description" Style="opacity:.7;font-size:.85rem">@context.Description</MudTd>
                     <MudTd DataLabel="Actions" Style="text-align:right">
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary" OnClick="() => EditTag(context)" />
@@ -110,6 +139,15 @@
                     @(_tagIsNew ? "New tag" : $"Edit {_tagEdit.Name}")
                 </MudText>
                 <div class="d-flex flex-wrap" style="gap:1rem">
+                    <MudTooltip Text="@KindHelp">
+                        <MudSelect T="TagKind" @bind-Value="_tagEdit.Kind" Label="Tag kind"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:11rem">
+                            @foreach (var kind in Enum.GetValues<TagKind>())
+                            {
+                                <MudSelectItem T="TagKind" Value="@kind">@KindLabel(kind)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudTooltip>
                     <MudTextField T="string" @bind-Value="_tagEdit.Name" Label="Name"
                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:12rem" />
                     <MudSelect T="string" @bind-Value="_tagGroupId" Label="Folder"
@@ -120,15 +158,18 @@
                             <MudSelectItem T="string" Value="@g.Id">@GroupPath(g.Id)</MudSelectItem>
                         }
                     </MudSelect>
-                    <MudSelect T="string" @bind-Value="_tagEdit.DeviceId" Label="Connection"
-                               Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:12rem">
-                        @foreach (var d in _devices)
-                        {
-                            <MudSelectItem T="string" Value="@d.Id">@d.Id (@d.Driver)</MudSelectItem>
-                        }
-                    </MudSelect>
-                    <MudTextField T="string" @bind-Value="_tagEdit.Address" Label="Address" Placeholder="40001 / sine"
-                                  Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:10rem" />
+                    @if (_tagEdit.Kind == TagKind.Device)
+                    {
+                        <MudSelect T="string" @bind-Value="_tagEdit.DeviceId" Label="Connection"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:12rem">
+                            @foreach (var d in _devices)
+                            {
+                                <MudSelectItem T="string" Value="@d.Id">@d.Id (@d.Driver)</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudTextField T="string" @bind-Value="_tagEdit.Address" Label="Address" Placeholder="40001 / sine"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:10rem" />
+                    }
                     <MudSelect T="DataType" @bind-Value="_tagEdit.DataType" Label="Data type"
                                Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:9rem">
                         @foreach (var dt in Enum.GetValues<DataType>())
@@ -140,13 +181,86 @@
                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:6rem" />
                     <MudTextField T="string" @bind-Value="_tagEdit.Description" Label="Description" Placeholder="What this tag measures"
                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:18rem;flex-grow:1" />
-                    <MudNumericField T="double" @bind-Value="_tagEdit.Scale" Label="Scale" HideSpinButtons
-                                     Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:7rem" />
-                    <MudNumericField T="double" @bind-Value="_tagEdit.Offset" Label="Offset" HideSpinButtons
-                                     Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:7rem" />
+                    @* Scaling is applied by the device worker to a raw reading, so it exists only for a
+                       device tag: a formula does its own arithmetic and a memory tag holds what was written. *@
+                    @if (_tagEdit.Kind == TagKind.Device)
+                    {
+                        <MudNumericField T="double" @bind-Value="_tagEdit.Scale" Label="Scale" HideSpinButtons
+                                         Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:7rem" />
+                        <MudNumericField T="double" @bind-Value="_tagEdit.Offset" Label="Offset" HideSpinButtons
+                                         Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:7rem" />
+                        <MudTooltip Text="@ScanRateHelp">
+                            <MudNumericField T="int" @bind-Value="_tagEdit.ScanIntervalMs" Label="Scan rate (ms)"
+                                             Min="0" Max="86400000" HideSpinButtons
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:9rem" />
+                        </MudTooltip>
+                        <MudTooltip Text="For cumulative registers (energy, run hours): a reading lower than the highest one so far is refused and the previous value kept, because on such a register a drop is a bad read. A meter that is genuinely replaced or reset stays held until you untick this or restart the gateway.">
+                            <MudSwitch T="bool" @bind-Value="_tagEdit.Monotonic" Color="Color.Primary"
+                                       Label="Only increases (counter)" Class="mt-2" />
+                        </MudTooltip>
+                    }
+                    @if (_tagEdit.Kind == TagKind.Memory)
+                    {
+                        <MudTooltip Text="What the tag holds before anything is written to it. Leave it empty and the tag starts Bad with 'never written' — honest for a setpoint nobody has set yet.">
+                            <MudTextField T="string" @bind-Value="_tagEdit.InitialValue" Label="Initial value" Placeholder="0"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:10rem" />
+                        </MudTooltip>
+                        <MudTooltip Text="Keep the value across a restart, in a file beside the project. Off by default on purpose: a gateway restarts because something went wrong, and a control setpoint that silently restores itself can put a plant back into a state nobody re-authorised.">
+                            <MudSwitch T="bool" @bind-Value="_tagEdit.Retentive" Color="Color.Primary"
+                                       Label="Keep value across restart" Class="mt-2" />
+                        </MudTooltip>
+                    }
+                    @if (_tagEdit.Kind == TagKind.Expression)
+                    {
+                        <MudSelect T="EvalMode" @bind-Value="_tagEdit.EvalMode" Label="Recompute"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:12rem">
+                            <MudSelectItem T="EvalMode" Value="@EvalMode.Scan">On a fixed period</MudSelectItem>
+                            <MudSelectItem T="EvalMode" Value="@EvalMode.OnChange">When an input changes</MudSelectItem>
+                        </MudSelect>
+                        @if (_tagEdit.EvalMode == EvalMode.Scan)
+                        {
+                            <MudTooltip Text="How often the formula is evaluated. 0 means the default of 1 second; the fastest allowed is 50 ms.">
+                                <MudNumericField T="int" @bind-Value="_tagEdit.ScanIntervalMs" Label="Every (ms)"
+                                                 Min="0" Max="86400000" HideSpinButtons
+                                                 Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:9rem" />
+                            </MudTooltip>
+                        }
+                    }
                 </div>
+
+                @if (_tagEdit.Kind == TagKind.Expression)
+                {
+                    <MudTextField T="string" Value="@(_tagEdit.Expression ?? "")" ValueChanged="OnExpressionChanged"
+                                  Label="Formula" Lines="3" Class="mt-3 mono" Immediate="false"
+                                  Placeholder="({Plant/P1} + {Plant/P2}) / 1000"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Error="@(_expressionError is not null)" ErrorText="@_expressionError"
+                                  HelperText="Tags in braces, e.g. {Plant/Line 1/Power}. Checked by the gateway when you leave the box." />
+
+                    @if (_expressionUnknown.Count > 0)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense Class="mt-2" Variant="Variant.Outlined">
+                            No such tag: @string.Join(", ", _expressionUnknown)
+                        </MudAlert>
+                    }
+                    else if (_expressionError is null && _expressionReads.Count > 0)
+                    {
+                        <MudText Typo="Typo.caption" Class="mt-1 d-block" Style="opacity:.7">
+                            Reads: @string.Join(", ", _expressionReads)
+                            @if (_expressionPreview is not null)
+                            {
+                                <span> · now: <b class="mono">@_expressionPreview</b></span>
+                            }
+                        </MudText>
+                    }
+                }
+
                 <MudText Typo="Typo.caption" Color="Color.Tertiary" Class="mt-2 d-block">
                     Runtime tag id: <code>@PreviewPath</code>
+                    @if (_tagEdit.ScanIntervalMs > 0)
+                    {
+                        <span> · read every <b>@FormatRate(_tagEdit.ScanIntervalMs)</b>@ConnectionRateNote</span>
+                    }
                 </MudText>
                 <div class="d-flex mt-3" style="gap:.6rem">
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
@@ -178,6 +292,13 @@
 
     private bool _busy;
     private string? _highlightTagId;
+
+    // Whatever the gateway said about the formula currently in the editor. Checked server-side by the
+    // same compiler the engine runs, so the editor can never accept something the engine refuses.
+    private string? _expressionError;
+    private List<string> _expressionReads = new();
+    private List<string> _expressionUnknown = new();
+    private string? _expressionPreview;
 
     protected override async Task OnInitializedAsync()
     {
@@ -214,9 +335,23 @@
 
     private async Task LoadAsync()
     {
-        _groups = await Http.GetFromJsonAsync<List<TagGroupDto>>("api/config/groups") ?? new();
-        _tags = await Http.GetFromJsonAsync<List<TagDto>>("api/config/tags") ?? new();
-        _devices = await Http.GetFromJsonAsync<List<DeviceDto>>("api/config/devices") ?? new();
+        // A refused read (no API key yet) must leave a page that renders and can be asked for one.
+        try
+        {
+            _groups = await Http.GetFromJsonAsync<List<TagGroupDto>>("api/config/groups") ?? new();
+            _tags = await Http.GetFromJsonAsync<List<TagDto>>("api/config/tags") ?? new();
+            _devices = await Http.GetFromJsonAsync<List<DeviceDto>>("api/config/devices") ?? new();
+        }
+        catch (Exception ex) when (ApiResponseErrors.IsUnauthorized(ex))
+        {
+            return;   // reported centrally; the layout asks for the key
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not load the tag database: {ex.Message}", Severity.Error);
+            return;
+        }
+
         if (_selectedGroupId != RootId && _groups.All(g => g.Id != _selectedGroupId))
             _selectedGroupId = RootId;
         BuildTree();
@@ -324,7 +459,7 @@
             var resp = await Http.PutAsJsonAsync($"api/config/groups/{_folderEdit.Id}", _folderEdit);
             if (!resp.IsSuccessStatusCode)
             {
-                Snackbar.Add($"Save failed: {await resp.Content.ReadAsStringAsync()}", Severity.Error);
+                Snackbar.Add($"Save failed: {await ApiResponseErrors.ReadAsync(resp)}", Severity.Error);
                 return;
             }
             _selectedGroupId = _folderEdit.Id;
@@ -346,7 +481,12 @@
         _busy = true;
         try
         {
-            await Http.DeleteAsync($"api/config/groups/{_selectedGroupId}");
+            var resp = await Http.DeleteAsync($"api/config/groups/{_selectedGroupId}");
+            if (!resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"Delete failed: {await ApiResponseErrors.ReadAsync(resp)}", Severity.Error);
+                return;
+            }
             _selectedGroupId = RootId;
             await LoadAsync();
             Snackbar.Add($"Deleted '{path}'. Click \"Apply to engine\" to make it live.", Severity.Info);
@@ -378,25 +518,132 @@
         _tagEdit = new TagDto
         {
             Id = Guid.NewGuid().ToString("N"),
+            // A gateway with no connection yet cannot have a device tag, so offer the kind that works.
+            Kind = _devices.Count > 0 ? TagKind.Device : TagKind.Memory,
             DeviceId = _devices.FirstOrDefault()?.Id ?? "",
             Name = "",
             Address = "",
         };
         _tagGroupId = _selectedGroupId;
         _folderEdit = null;
+        ClearExpressionCheck();
     }
 
-    private void EditTag(TagDto t)
+    private async Task EditTag(TagDto t)
     {
         _tagIsNew = false;
         _tagEdit = new TagDto
         {
-            Id = t.Id, GroupId = t.GroupId, DeviceId = t.DeviceId, Name = t.Name,
+            Id = t.Id, GroupId = t.GroupId, DeviceId = t.DeviceId, Kind = t.Kind, Name = t.Name,
             Address = t.Address, DataType = t.DataType, Unit = t.Unit, Description = t.Description,
-            Scale = t.Scale, Offset = t.Offset,
+            Scale = t.Scale, Offset = t.Offset, Monotonic = t.Monotonic,
+            ScanIntervalMs = t.ScanIntervalMs,
+            Expression = t.Expression, InitialValue = t.InitialValue,
+            Retentive = t.Retentive, EvalMode = t.EvalMode,
         };
         _tagGroupId = t.GroupId ?? RootId;
         _folderEdit = null;
+        ClearExpressionCheck();
+
+        // Show at once what the stored formula reads and what it evaluates to right now — a renamed
+        // tag underneath an old formula is otherwise invisible until the next apply.
+        if (t.Kind == TagKind.Expression && !string.IsNullOrWhiteSpace(t.Expression))
+            await CheckExpressionAsync(t.Expression!);
+    }
+
+    private void ClearExpressionCheck()
+    {
+        _expressionError = null;
+        _expressionReads = new();
+        _expressionUnknown = new();
+        _expressionPreview = null;
+    }
+
+    private async Task OnExpressionChanged(string? text)
+    {
+        if (_tagEdit is null) return;
+        _tagEdit.Expression = text;
+        ClearExpressionCheck();
+        if (!string.IsNullOrWhiteSpace(text))
+            await CheckExpressionAsync(text);
+    }
+
+    private async Task CheckExpressionAsync(string text)
+    {
+        try
+        {
+            var body = new { Expression = text };
+            var check = await (await Http.PostAsJsonAsync("api/expressions/validate", body))
+                .Content.ReadFromJsonAsync<ExpressionCheck>();
+            if (check is null) return;
+
+            if (!check.Valid)
+            {
+                _expressionError = $"{check.Error} (at character {check.Position + 1})";
+                return;
+            }
+            _expressionReads = check.ReferencedTags;
+            _expressionUnknown = check.UnknownTags;
+
+            // Evaluating against the live values turns "it compiles" into "it gives this number",
+            // which is the question the person writing the formula actually has.
+            var result = await (await Http.PostAsJsonAsync("api/expressions/evaluate", body))
+                .Content.ReadFromJsonAsync<ExpressionResult>();
+            _expressionPreview = result is null ? null
+                : result.Quality == Quality.Good ? result.Text
+                : $"{result.Quality} — {result.Status}";
+        }
+        catch (Exception ex) when (ApiResponseErrors.IsUnauthorized(ex))
+        {
+            // Reported centrally; the formula simply stays unchecked until a key is entered.
+        }
+        catch (Exception ex)
+        {
+            _expressionError = ex.Message;
+        }
+    }
+
+    private static string KindLabel(TagKind kind) => kind switch
+    {
+        TagKind.Memory => "Memory",
+        TagKind.Expression => "Expression",
+        _ => "Device",
+    };
+
+    private static Color KindColour(TagKind kind) => kind switch
+    {
+        TagKind.Memory => Color.Warning,
+        TagKind.Expression => Color.Tertiary,
+        _ => Color.Default,
+    };
+
+    private static string SourceText(TagDto t) => t.Kind switch
+    {
+        TagKind.Expression => t.Expression ?? "",
+        TagKind.Memory => string.IsNullOrWhiteSpace(t.InitialValue)
+            ? "(no initial value)"
+            : $"= {t.InitialValue}" + (t.Retentive ? " · kept" : ""),
+        _ => t.Address,
+    };
+
+    private const string KindHelp =
+        "Device: read from a connection by a driver. Memory: holds whatever is written to it — a "
+        + "setpoint, a mode, an operator note. Expression: computed from other tags by a formula.";
+
+    private sealed class ExpressionCheck
+    {
+        public bool Valid { get; set; }
+        public string? Error { get; set; }
+        public int Position { get; set; }
+        public List<string> ReferencedTags { get; set; } = new();
+        public List<string> UnknownTags { get; set; } = new();
+    }
+
+    private sealed class ExpressionResult
+    {
+        public Quality Quality { get; set; }
+        public string? Status { get; set; }
+        public string Text { get; set; } = "";
     }
 
     private string PreviewPath
@@ -410,11 +657,46 @@
         }
     }
 
+    private const string ScanRateHelp =
+        "How often to read this one tag. 0 (the normal case) means it is read on every scan of its "
+        + "connection. Set it slower for values that change rarely — a daily energy total, a "
+        + "nameplate register — to save bandwidth and PLC time on a metered or congested link. "
+        + "Faster than the connection's own interval has no effect: that interval is the clock "
+        + "everything ticks on. A slower rate also delays noticing the device has died, by at most "
+        + "the slowest rate on that connection.";
+
+    /// <summary>The connection's interval is the floor, so say so when the tag asks for less.</summary>
+    private string ConnectionRateNote
+    {
+        get
+        {
+            var device = _devices.FirstOrDefault(d => d.Id == _tagEdit?.DeviceId);
+            if (device is null || _tagEdit is null || _tagEdit.ScanIntervalMs <= 0)
+                return "";
+            return _tagEdit.ScanIntervalMs < device.ScanIntervalMs
+                ? $" — but the connection scans every {FormatRate(device.ScanIntervalMs)}, so that is the real rate"
+                : "";
+        }
+    }
+
+    // Written as if/else, not a switch expression: Razor's parser reads a relational pattern's
+    // leading '<' as the start of an HTML tag and the whole @code block stops compiling.
+    private static string FormatRate(int ms)
+    {
+        if (ms < 1000) return $"{ms} ms";
+        if (ms < 60_000) return $"{ms / 1000.0:0.##} s";
+        if (ms < 3_600_000) return $"{ms / 60_000.0:0.##} min";
+        return $"{ms / 3_600_000.0:0.##} h";
+    }
+
     private async Task SaveTagAsync()
     {
         if (_tagEdit is null) return;
         if (string.IsNullOrWhiteSpace(_tagEdit.Name)) { Snackbar.Add("Tag name is required.", Severity.Warning); return; }
-        if (string.IsNullOrWhiteSpace(_tagEdit.DeviceId)) { Snackbar.Add("Pick the connection this tag reads from.", Severity.Warning); return; }
+        if (_tagEdit.Kind == TagKind.Device && string.IsNullOrWhiteSpace(_tagEdit.DeviceId))
+        { Snackbar.Add("Pick the connection this tag reads from.", Severity.Warning); return; }
+        if (_tagEdit.Kind == TagKind.Expression && string.IsNullOrWhiteSpace(_tagEdit.Expression))
+        { Snackbar.Add("An expression tag needs a formula.", Severity.Warning); return; }
         _tagEdit.GroupId = _tagGroupId == RootId ? null : _tagGroupId;
 
         _busy = true;
@@ -423,7 +705,7 @@
             var resp = await Http.PutAsJsonAsync($"api/config/tags/{_tagEdit.Id}", _tagEdit);
             if (!resp.IsSuccessStatusCode)
             {
-                Snackbar.Add($"Save failed: {await resp.Content.ReadAsStringAsync()}", Severity.Error);
+                Snackbar.Add($"Save failed: {await ApiResponseErrors.ReadAsync(resp)}", Severity.Error);
                 return;
             }
             _tagEdit = null;
@@ -438,7 +720,12 @@
         _busy = true;
         try
         {
-            await Http.DeleteAsync($"api/config/tags/{t.Id}");
+            var resp = await Http.DeleteAsync($"api/config/tags/{t.Id}");
+            if (!resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"Delete failed: {await ApiResponseErrors.ReadAsync(resp)}", Severity.Error);
+                return;
+            }
             await LoadAsync();
             Snackbar.Add($"Deleted '{t.Path}'. Click \"Apply to engine\" to make it live.", Severity.Info);
         }
@@ -452,8 +739,13 @@
         _busy = true;
         try
         {
-            await Http.PostAsync("api/config/reload", null);
-            Snackbar.Add("Applied — engine reloaded with the current configuration.", Severity.Success);
+            var resp = await Http.PostAsync("api/config/reload", null);
+            if (!resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"Apply failed: {await ApiResponseErrors.ReadAsync(resp)}", Severity.Error);
+                return;
+            }
+            Connections.ReportApply(Snackbar, await resp.Content.ReadFromJsonAsync<Connections.ApplyResult>());
         }
         finally { _busy = false; }
     }

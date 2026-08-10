@@ -28,6 +28,8 @@
     <ProjectReference Include="..\..\src\HinoGateway.Drivers.Modbus\HinoGateway.Drivers.Modbus.csproj" />
     <ProjectReference Include="..\..\src\HinoGateway.Storage\HinoGateway.Storage.csproj" />
     <ProjectReference Include="..\..\src\HinoGateway.Northbound.Iec104\HinoGateway.Northbound.Iec104.csproj" />
+    <ProjectReference Include="..\..\src\HinoGateway.Expressions\HinoGateway.Expressions.csproj" />
+    <ProjectReference Include="..\..\src\HinoGateway.Server\HinoGateway.Server.csproj" />
   </ItemGroup>
 
 </Project>

@@ -49,12 +49,34 @@ public sealed class DeviceWorker : IAsyncDisposable
     public IReadOnlyList<DriverBlockStat> Blocks =>
         _driver is IDriverDiagnostics diagnostics ? diagnostics.Blocks : Array.Empty<DriverBlockStat>();
 
+    /// <summary>
+    /// The poll loop would not stop within <see cref="StopDeadline"/> and has been left running.
+    /// The engine counts these and reports that the process needs restarting: the thread, its
+    /// driver and its link are all still held, so further reloads would leak more of them.
+    /// </summary>
+    public bool IsAbandoned => _abandoned;
+
+    private volatile bool _abandoned;
+
+    /// <summary>
+    /// How long a reload or shutdown waits for one device loop. Long enough for a poll in flight on
+    /// a slow link to finish, short enough that one dead device cannot hold up the whole fleet.
+    /// </summary>
+    private static readonly TimeSpan StopDeadline = TimeSpan.FromSeconds(10);
+
     public void Start()
     {
         if (_runTask is not null)
             return;
         _cts = new CancellationTokenSource();
-        _runTask = Task.Run(() => RunAsync(_cts.Token));
+
+        // A dedicated thread, NOT Task.Run: industrial protocol clients block inside their *Async
+        // methods, and a few dozen of those on the thread pool starve it — the pool grows by about
+        // one thread per second, so timers stop firing and unrelated devices go Bad. Measured
+        // 2026-08-01: 150 devices behind a 200 ms link managed 12.8 of 65 expected polls on the
+        // pool, and 59 of 65 once the loops were kept off it. See WorkerThread.
+        _runTask = WorkerThread.Run($"device-{_config.DeviceId}", () => RunAsync(_cts.Token),
+            ex => _logger.LogError(ex, "Device {DeviceId}: callback failed", _config.DeviceId));
     }
 
     private async Task RunAsync(CancellationToken ct)
@@ -206,7 +228,22 @@ public sealed class DeviceWorker : IAsyncDisposable
         {
             _cts?.Cancel();
             if (_runTask is not null)
-                await _runTask;
+            {
+                // Bounded, because an unbounded await here is a hang: a driver that ignores
+                // cancellation — a synchronous socket read with no timeout, a serial port whose
+                // device was unplugged — would otherwise stop the gateway from ever reloading or
+                // shutting down. Giving up is worse than waiting only in the sense that it leaks a
+                // thread, and that is why it is reported rather than swallowed.
+                await _runTask.WaitAsync(StopDeadline);
+            }
+        }
+        catch (TimeoutException)
+        {
+            _abandoned = true;
+            _logger.LogCritical(
+                "Device {DeviceId}: the poll loop did not stop within {Deadline}. Its thread, driver " +
+                "and link are still held; the gateway process needs restarting.",
+                _config.DeviceId, StopDeadline);
         }
         catch (Exception ex)
         {
@@ -215,7 +252,19 @@ public sealed class DeviceWorker : IAsyncDisposable
         finally
         {
             _cts?.Dispose();
-            await _driver.DisposeAsync();
+            if (_abandoned)
+            {
+                // The loop is still inside the driver. Disposing it from here would block on the
+                // same call, so let it go on its own and keep the reload moving.
+                _ = Task.Run(async () =>
+                {
+                    try { await _driver.DisposeAsync(); } catch { /* nothing left to do */ }
+                });
+            }
+            else
+            {
+                await _driver.DisposeAsync();
+            }
         }
     }
 }

@@ -77,6 +77,7 @@ builder.Services.AddSingleton<AlarmEngine>();
 // Driver factories â€” one registration per driver package. Add S7/IEC104/... here later.
 builder.Services.AddSingleton<IDeviceDriverFactory, SimulatorDriverFactory>();
 builder.Services.AddSingleton<IDeviceDriverFactory, HinoGateway.Drivers.Modbus.ModbusTcpDriverFactory>();
+builder.Services.AddSingleton<IDeviceDriverFactory, HinoGateway.Drivers.SiemensS7.SiemensS7DriverFactory>();
 
 // Background services: start the engine, and bridge its updates to SignalR.
 builder.Services.AddHostedService<EngineHostedService>();
@@ -87,6 +88,10 @@ builder.Services.AddHostedService<AlarmService>();
 // Registered as a singleton as well as a hosted service so the config API can restart it.
 builder.Services.AddSingleton<Iec104HostedService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Iec104HostedService>());
+
+// MQTT keeps its own durable disk spool and can be reapplied without restarting the gateway.
+builder.Services.AddSingleton<MqttHostedService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<MqttHostedService>());
 
 var app = builder.Build();
 

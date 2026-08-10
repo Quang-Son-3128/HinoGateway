@@ -83,3 +83,19 @@ public sealed record MqttBatch(
     string GatewayId,
     DateTimeOffset CreatedAt,
     IReadOnlyList<MqttTagSample> Samples);
+
+public sealed record MqttPublisherStatus(
+    bool Enabled,
+    bool Running,
+    bool Connected,
+    string Endpoint,
+    string Topic,
+    long PublishedBatches,
+    long PublishedSamples,
+    long PendingBatches,
+    long PendingBytes,
+    long DroppedInputBatches,
+    long DroppedSpoolBatches,
+    DateTimeOffset? LastConnectedAt,
+    DateTimeOffset? LastPublishedAt,
+    string? LastError);

@@ -19,7 +19,11 @@ public sealed record DriverBlockStat(
     double LastLatencyMs,
     string? LastError,
     // Set while the block is being skipped after the device refused it.
-    bool Quarantined);
+    bool Quarantined)
+{
+    /// <summary>0 means the block is read on every connection scan.</summary>
+    public int ScanIntervalMs { get; init; }
+}
 
 /// <summary>
 /// Optional driver capability: report how the reads are actually being issued. A driver that groups

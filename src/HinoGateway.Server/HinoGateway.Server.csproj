@@ -29,6 +29,8 @@
     <ProjectReference Include="..\HinoGateway.Storage\HinoGateway.Storage.csproj" />
     <ProjectReference Include="..\HinoGateway.Drivers.Modbus\HinoGateway.Drivers.Modbus.csproj" />
     <ProjectReference Include="..\HinoGateway.Northbound.Iec104\HinoGateway.Northbound.Iec104.csproj" />
+    <ProjectReference Include="..\HinoGateway.Drivers.SiemensS7\HinoGateway.Drivers.SiemensS7.csproj" />
+    <ProjectReference Include="..\HinoGateway.Northbound.Mqtt\HinoGateway.Northbound.Mqtt.csproj" />
   </ItemGroup>
 
 </Project>

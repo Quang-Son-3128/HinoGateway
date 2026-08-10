@@ -30,6 +30,8 @@
     <ProjectReference Include="..\..\src\HinoGateway.Northbound.Iec104\HinoGateway.Northbound.Iec104.csproj" />
     <ProjectReference Include="..\..\src\HinoGateway.Expressions\HinoGateway.Expressions.csproj" />
     <ProjectReference Include="..\..\src\HinoGateway.Server\HinoGateway.Server.csproj" />
+    <ProjectReference Include="..\..\src\HinoGateway.Drivers.SiemensS7\HinoGateway.Drivers.SiemensS7.csproj" />
+    <ProjectReference Include="..\..\src\HinoGateway.Northbound.Mqtt\HinoGateway.Northbound.Mqtt.csproj" />
   </ItemGroup>
 
 </Project>

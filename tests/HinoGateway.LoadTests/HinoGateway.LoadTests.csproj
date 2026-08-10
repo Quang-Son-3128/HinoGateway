@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>HinoGateway.LoadTests</AssemblyName>
+    <RootNamespace>HinoGateway.LoadTests</RootNamespace>
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HinoGateway.Core\HinoGateway.Core.csproj" />
+    <ProjectReference Include="..\..\src\HinoGateway.Drivers.Modbus\HinoGateway.Drivers.Modbus.csproj" />
+    <ProjectReference Include="..\..\src\HinoGateway.Engine\HinoGateway.Engine.csproj" />
+  </ItemGroup>
+</Project>

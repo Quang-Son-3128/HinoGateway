@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace HinoGateway.Core;
 
 /// <summary>What kind of value a driver setting holds, so the editor can render the right control.</summary>
@@ -85,6 +87,9 @@ public sealed record DriverDescriptor
 
     public string DisplayName { get; init; } = "";
 
+    /// <summary>One line under the driver picker: what this driver talks to.</summary>
+    public string? Description { get; init; }
+
     /// <summary>One line for the driver picker.</summary>
     public string? Summary { get; init; }
 
@@ -95,6 +100,20 @@ public sealed record DriverDescriptor
     /// nothing, which is what a driver that handles everything wants.
     /// </summary>
     public IReadOnlyCollection<DataType> SupportedTypes { get; init; } = Array.Empty<DataType>();
+
+    public DriverCapabilities Capabilities { get; init; } = DriverCapabilities.None;
+
+    /// <summary>Template used to render the endpoint in the connections table.</summary>
+    public string? EndpointFormat { get; init; }
+
+    /// <summary>Scan interval proposed for a new connection of this type.</summary>
+    public int DefaultScanIntervalMs { get; init; } = 1000;
+
+    /// <summary>How to write a tag address for this driver.</summary>
+    public string? AddressSyntaxHelp { get; init; }
+
+    /// <summary>A few real addresses shown beside the syntax help.</summary>
+    public IReadOnlyList<string> AddressExamples { get; init; } = Array.Empty<string>();
 
     /// <summary>Example address, shown as the placeholder in the tag editor.</summary>
     public string? AddressExample { get; init; }
@@ -108,6 +127,29 @@ public sealed record DriverDescriptor
     public bool Knows(string key) =>
         Settings.Any(s => string.Equals(s.Key, key, StringComparison.OrdinalIgnoreCase));
 
+    public DriverSetting? Setting(string key) =>
+        Settings.FirstOrDefault(s => string.Equals(s.Key, key, StringComparison.OrdinalIgnoreCase));
+
+    public string FormatEndpoint(IReadOnlyDictionary<string, string>? settings)
+    {
+        if (string.IsNullOrWhiteSpace(EndpointFormat)) return "";
+
+        return Placeholder.Replace(EndpointFormat, match =>
+        {
+            var key = match.Groups[1].Value;
+            if (settings is not null
+                && settings.TryGetValue(key, out var value)
+                && !string.IsNullOrWhiteSpace(value))
+                return value.Trim();
+
+            var declared = Setting(key)?.Default;
+            return string.IsNullOrWhiteSpace(declared) ? "?" : declared;
+        });
+    }
+
+    private static readonly Regex Placeholder =
+        new(@"\{([A-Za-z0-9_]+)\}", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     /// <summary>
     /// The fallback for a driver that does not describe itself, and for a factory whose
     /// <c>Describe()</c> throws. An empty settings list means the validator checks nothing rather
@@ -118,4 +160,14 @@ public sealed record DriverDescriptor
         DriverType = driverType,
         DisplayName = driverType,
     };
+}
+
+[Flags]
+public enum DriverCapabilities
+{
+    None = 0,
+    Writable = 1,
+    BulkRead = 2,
+    Diagnostics = 4,
+    Subscription = 8,
 }

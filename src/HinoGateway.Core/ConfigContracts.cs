@@ -36,13 +36,28 @@ public interface IConfigStore
 
     // --- Tags (flat list; folder membership via GroupId) ----------------------
     Task<IReadOnlyList<TagDto>> GetTagsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// The memory and expression tags, as the engine needs them: <see cref="TagDefinition.Id"/> is
+    /// the full folder path, exactly like the device tags carried by <see cref="GetDevicesAsync"/>.
+    /// They are fetched separately because they belong to no connection — that is the whole point of
+    /// them — and the engine runs them through a different producer.
+    /// </summary>
+    Task<IReadOnlyList<TagDefinition>> GetInternalTagsAsync(CancellationToken ct = default);
+
     Task UpsertTagAsync(TagDto tag, CancellationToken ct = default);
     Task<bool> DeleteTagAsync(string tagId, CancellationToken ct = default);
+    /// <summary>Atomically clears devices, folders and tags; intended for project replacement.</summary>
+    Task<int> ClearTopologyAsync(CancellationToken ct = default);
 
     // --- Northbound: IEC 60870-5-104 controlled station -----------------------
     /// <summary>Never null: an unconfigured gateway returns disabled defaults.</summary>
     Task<Iec104ServerOptions> GetIec104Async(CancellationToken ct = default);
     Task SaveIec104Async(Iec104ServerOptions options, CancellationToken ct = default);
+
+    // --- Northbound: MQTT publisher ------------------------------------------
+    Task<MqttPublisherOptions> GetMqttAsync(CancellationToken ct = default);
+    Task SaveMqttAsync(MqttPublisherOptions options, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -64,6 +79,10 @@ public sealed class DeviceDto
     public string Id { get; set; } = "";
     public string Driver { get; set; } = "Simulator";
     public int ScanIntervalMs { get; set; } = 1000;
+
+    /// <summary>See <see cref="DeviceConfig.FailureThreshold"/>. 1 = drop the link on the first failed poll.</summary>
+    public int FailureThreshold { get; set; } = 3;
+
     public Dictionary<string, string> Settings { get; set; } = new();
 
     /// <summary>
@@ -89,7 +108,13 @@ public sealed class TagDto
     /// <summary>Folder this tag lives in; null = root.</summary>
     public string? GroupId { get; set; }
 
-    /// <summary>The connection (device) this tag reads from.</summary>
+    /// <summary>
+    /// What produces this tag's value. <see cref="TagKind.Device"/> is 0, so a project file written
+    /// before the other kinds existed loads exactly as it always did.
+    /// </summary>
+    public TagKind Kind { get; set; } = TagKind.Device;
+
+    /// <summary>The connection (device) this tag reads from. Empty for a memory or expression tag.</summary>
     public string DeviceId { get; set; } = "";
 
     public string Name { get; set; } = "";
@@ -100,10 +125,38 @@ public sealed class TagDto
     /// </summary>
     public string Path { get; set; } = "";
 
+    /// <summary>Driver address. Empty for a memory or expression tag, which has no device.</summary>
     public string Address { get; set; } = "";
+
+    /// <summary>The formula of an expression tag, e.g. <c>({Plant/P1} + {Plant/P2}) * 0.001</c>.</summary>
+    public string? Expression { get; set; }
+
+    /// <summary>What a memory tag holds before anything is written to it. See <see cref="TagDefinition.InitialValue"/>.</summary>
+    public string? InitialValue { get; set; }
+
+    /// <summary>Keep a memory tag's value across a restart. Off by default — see <see cref="TagDefinition.Retentive"/>.</summary>
+    public bool Retentive { get; set; }
+
+    /// <summary>When an expression tag recomputes: on its scan interval, or when an input changes.</summary>
+    public EvalMode EvalMode { get; set; } = EvalMode.Scan;
+
     public DataType DataType { get; set; } = DataType.Float64;
     public string? Unit { get; set; }
     public string? Description { get; set; }
     public double Scale { get; set; } = 1.0;
     public double Offset { get; set; } = 0.0;
+
+    /// <summary>
+    /// Cumulative counter: a read lower than the highest accepted so far is refused and the previous
+    /// value kept. See <see cref="TagDefinition.Monotonic"/>.
+    /// </summary>
+    public bool Monotonic { get; set; }
+
+    /// <summary>
+    /// Per-tag scan rate in milliseconds; <b>0 means "follow the connection"</b>, which is the normal
+    /// case. Slower than the connection's own interval saves bandwidth and PLC time on values that
+    /// change rarely; faster is meaningless — the connection's interval is the clock everything
+    /// ticks on. See <see cref="TagDefinition.ScanInterval"/>.
+    /// </summary>
+    public int ScanIntervalMs { get; set; }
 }

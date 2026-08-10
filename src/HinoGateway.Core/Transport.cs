@@ -20,4 +20,9 @@ public sealed record TagInfo(
     string DeviceId,
     DataType DataType,
     string? Unit,
-    string? Description);
+    string? Description,
+    /// <summary>
+    /// Device, memory or expression. Last and defaulted so every existing caller is unaffected; the
+    /// UI uses it to show where a value comes from, since a computed tag has no connection to name.
+    /// </summary>
+    TagKind Kind = TagKind.Device);

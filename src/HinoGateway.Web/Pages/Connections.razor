@@ -90,14 +90,21 @@
             @(_isNew ? "New connection" : $"Edit {_edit.Id}")
         </MudText>
 
+        @{
+            var descriptor = Descriptor(_edit.Driver);
+            var declared = descriptor.Settings;
+            var basic = declared.Where(s => !s.Advanced).ToList();
+            var advanced = declared.Where(s => s.Advanced).ToList();
+        }
+
         <div class="d-flex flex-wrap" style="gap:1rem">
             <MudTextField T="string" @bind-Value="_edit.Id" Label="Connection Id" Disabled="@(!_isNew)"
                           Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:14rem" />
             <MudSelect T="string" @bind-Value="_edit.Driver" @bind-Value:after="OnDriverChanged" Label="Driver"
-                       Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:12rem">
-                @foreach (var drv in _drivers)
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:14rem">
+                @foreach (var drv in _descriptors)
                 {
-                    <MudSelectItem T="string" Value="@drv">@drv</MudSelectItem>
+                    <MudSelectItem T="string" Value="@drv.DriverType">@DriverLabel(drv)</MudSelectItem>
                 }
             </MudSelect>
             <MudNumericField T="int" @bind-Value="_edit.ScanIntervalMs" Label="Scan interval (ms)" Min="50"
@@ -107,27 +114,89 @@
                              Style="min-width:13rem" HelperText="Fatal link errors still reconnect immediately" />
         </div>
 
-        <MudText Typo="Typo.subtitle2" Class="mt-4 mb-1">Settings</MudText>
-        <MudSimpleTable Dense Bordered Elevation="0" Style="background:transparent">
-            <thead><tr><th style="width:16rem">Key</th><th>Value</th><th style="width:3rem"></th></tr></thead>
-            <tbody>
-                @foreach (var s in _settings)
-                {
-                    <tr>
-                        <td><MudTextField T="string" @bind-Value="s.Key" Margin="Margin.Dense" Variant="Variant.Text" Placeholder="Host" /></td>
-                        <td><MudTextField T="string" @bind-Value="s.Value" Margin="Margin.Dense" Variant="Variant.Text" Placeholder="127.0.0.1" /></td>
-                        <td><MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Error" OnClick="() => _settings.Remove(s)" /></td>
-                    </tr>
-                }
-            </tbody>
-        </MudSimpleTable>
-        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => _settings.Add(new SettingRow())">Add setting</MudButton>
-        @if (_edit.Driver == "ModbusTCP")
+        @if (!string.IsNullOrWhiteSpace(descriptor.Description))
         {
-            <MudAlert Severity="Severity.Info" Dense Class="mt-2" Variant="Variant.Outlined">
-                Keys: <b>Host</b>, <b>Port</b> (502), <b>UnitId</b> (1), TimeoutMs, Retries, WordSwap.
-                Address: <code>40001</code> (holding reg 0), <code>30001</code> (input), <code>00001</code> (coil),
-                <code>10001</code> (discrete). A bare number like <code>3</code> = holding register 3.
+            <MudText Typo="Typo.body2" Class="mt-2" Style="opacity:.7">@descriptor.Description</MudText>
+        }
+
+        <MudText Typo="Typo.subtitle2" Class="mt-4 mb-1">Settings</MudText>
+
+        @* Every box below comes from the driver's own descriptor, so a new driver arrives with its
+           parameters already on screen instead of leaving the operator to guess the key names. *@
+        @if (basic.Count > 0)
+        {
+            <div class="d-flex flex-wrap align-start" style="gap:1rem">
+                @foreach (var setting in basic)
+                {
+                    <DriverSettingField Setting="setting" Value="@ValueOf(setting)"
+                                        ValueChanged="@(v => SetValue(setting, v))"
+                                        Style="min-width:14rem;flex:0 1 16rem" />
+                }
+            </div>
+        }
+
+        @if (advanced.Count > 0)
+        {
+            <MudExpansionPanels Elevation="0" Class="mt-3" Dense>
+                <MudExpansionPanel Text="@($"Tuning ({advanced.Count} optional)")">
+                    <MudText Typo="Typo.caption" Class="d-block mb-2" Style="opacity:.6">
+                        Left blank, each keeps the driver's default shown in the box.
+                    </MudText>
+                    <div class="d-flex flex-wrap align-start" style="gap:1rem">
+                        @foreach (var setting in advanced)
+                        {
+                            <DriverSettingField Setting="setting" Value="@ValueOf(setting)"
+                                                ValueChanged="@(v => SetValue(setting, v))"
+                                                Style="min-width:14rem;flex:0 1 16rem" />
+                        }
+                    </div>
+                </MudExpansionPanel>
+            </MudExpansionPanels>
+        }
+
+        @* A driver that describes nothing, and any leftover key the current driver does not declare,
+           still has to be editable — otherwise upgrading a driver would strand a saved setting with
+           no way to see or remove it. *@
+        @if (declared.Count == 0 || _extra.Count > 0)
+        {
+            @if (declared.Count > 0)
+            {
+                <MudAlert Severity="Severity.Warning" Dense Variant="Variant.Outlined" Class="mt-3">
+                    @($"{_extra.Count} setting(s) below are not declared by {descriptor.DriverType}. The gateway refuses unknown settings — remove them or fix the spelling.")
+                </MudAlert>
+            }
+            <MudSimpleTable Dense Bordered Elevation="0" Class="mt-2" Style="background:transparent">
+                <thead><tr><th style="width:16rem">Key</th><th>Value</th><th style="width:3rem"></th></tr></thead>
+                <tbody>
+                    @foreach (var row in _extra)
+                    {
+                        <tr>
+                            <td><MudTextField T="string" @bind-Value="row.Key" Margin="Margin.Dense" Variant="Variant.Text" Placeholder="Host" /></td>
+                            <td><MudTextField T="string" @bind-Value="row.Value" Margin="Margin.Dense" Variant="Variant.Text" Placeholder="127.0.0.1" /></td>
+                            <td><MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Error" OnClick="() => _extra.Remove(row)" /></td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => _extra.Add(new SettingRow())">Add setting</MudButton>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(descriptor.AddressSyntaxHelp))
+        {
+            <MudAlert Severity="Severity.Info" Dense Class="mt-3" Variant="Variant.Outlined">
+                <b>Tag addresses for this driver:</b> @descriptor.AddressSyntaxHelp
+                @if (descriptor.AddressExamples.Count > 0)
+                {
+                    <span> e.g. </span>
+                    @for (var i = 0; i < descriptor.AddressExamples.Count; i++)
+                    {
+                        @if (i > 0)
+                        {
+                            <span>, </span>
+                        }
+                        <code>@descriptor.AddressExamples[i]</code>
+                    }
+                }
             </MudAlert>
         }
 
@@ -140,11 +209,20 @@
 
 @code {
     private List<DeviceDto> _devices = new();
-    private List<string> _drivers = new();
+    private List<DriverDescriptor> _descriptors = new();
     private Dictionary<string, DeviceHealth> _health = new();
     private System.Threading.Timer? _healthTimer;
     private DeviceDto? _edit;
-    private readonly List<SettingRow> _settings = new();
+
+    /// <summary>Values for the settings the selected driver declares, keyed by setting key.</summary>
+    private readonly Dictionary<string, string> _values = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Keys the driver does not declare: a free-form driver, or a leftover from an old one.</summary>
+    private readonly List<SettingRow> _extra = new();
+
+    /// <summary>Which driver the values in <see cref="_values"/> were entered against.</summary>
+    private string _previousDriver = "";
+
     private bool _isNew;
     private bool _busy;
     private bool _replaceOnImport;
@@ -157,7 +235,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _drivers = await Http.GetFromJsonAsync<List<string>>("api/config/drivers") ?? new();
+        await LoadDriversAsync();
         await LoadDevicesAsync();
         _healthTimer = new System.Threading.Timer(_ => InvokeAsync(RefreshHealthAsync), null, 0, 3000);
     }
@@ -181,18 +259,20 @@
         _ => "led-idle",
     };
 
-    // Compact endpoint summary for the table, e.g. "192.168.1.10:502 #1".
-    private static string Endpoint(DeviceDto d)
+    // Compact endpoint summary for the table, rendered from the driver's own template — an S7
+    // connection shows its rack and slot without this page knowing what a rack is.
+    private string Endpoint(DeviceDto d)
     {
-        if (d.Driver == "ModbusTCP")
-        {
-            var host = d.Settings.GetValueOrDefault("Host", "?");
-            var port = d.Settings.GetValueOrDefault("Port", "502");
-            var unit = d.Settings.GetValueOrDefault("UnitId", "1");
-            return $"{host}:{port} #{unit}";
-        }
-        return d.Driver == "Simulator" ? "(internal)" : "";
+        var text = Descriptor(d.Driver).FormatEndpoint(d.Settings);
+        return string.IsNullOrWhiteSpace(text) ? "(internal)" : text;
     }
+
+    private DriverDescriptor Descriptor(string? driver) =>
+        _descriptors.FirstOrDefault(x => string.Equals(x.DriverType, driver, StringComparison.OrdinalIgnoreCase))
+        ?? DriverDescriptor.Minimal(driver ?? "");
+
+    private static string DriverLabel(DriverDescriptor d) =>
+        string.IsNullOrWhiteSpace(d.DisplayName) ? d.DriverType : d.DisplayName;
 
     public void Dispose() => _healthTimer?.Dispose();
 
@@ -201,31 +281,32 @@
         _devices = await Http.GetFromJsonAsync<List<DeviceDto>>("api/config/devices") ?? new();
     }
 
+    /// <summary>
+    /// The driver list is the descriptor list: names, settings and address syntax arrive together so
+    /// the editor never has to hard-code a protocol. A server too old to describe its drivers still
+    /// yields a working, free-form editor via <see cref="DriverDescriptor.Minimal"/>.
+    /// </summary>
+    private async Task LoadDriversAsync()
+    {
+        try
+        {
+            _descriptors = await Http.GetFromJsonAsync<List<DriverDescriptor>>("api/config/driver-descriptors") ?? new();
+        }
+        catch
+        {
+            var names = await Http.GetFromJsonAsync<List<string>>("api/config/drivers") ?? new();
+            _descriptors = names.Select(DriverDescriptor.Minimal).ToList();
+        }
+    }
+
     private void NewDevice()
     {
         _isNew = true;
-        _edit = new DeviceDto { Driver = _drivers.FirstOrDefault() ?? "Simulator", ScanIntervalMs = 1000 };
-        SyncSettingsFromEdit();
+        _edit = new DeviceDto { Driver = _descriptors.FirstOrDefault()?.DriverType ?? "Simulator" };
+        _values.Clear();
+        _extra.Clear();
+        _previousDriver = "";
         OnDriverChanged();
-    }
-
-    private void SyncSettingsFromEdit()
-    {
-        _settings.Clear();
-        foreach (var kv in _edit!.Settings)
-            _settings.Add(new SettingRow { Key = kv.Key, Value = kv.Value });
-    }
-
-    private void OnDriverChanged()
-    {
-        if (_edit?.Driver == "ModbusTCP" && !_settings.Any(s => !string.IsNullOrWhiteSpace(s.Key)))
-        {
-            _settings.Clear();
-            _settings.Add(new SettingRow { Key = "Host", Value = "127.0.0.1" });
-            _settings.Add(new SettingRow { Key = "Port", Value = "502" });
-            _settings.Add(new SettingRow { Key = "UnitId", Value = "1" });
-            _settings.Add(new SettingRow { Key = "TimeoutMs", Value = "1000" });
-        }
     }
 
     private void Edit(DeviceDto d)
@@ -239,7 +320,60 @@
             FailureThreshold = d.FailureThreshold,
             Settings = new(d.Settings),
         };
-        SyncSettingsFromEdit();
+
+        var descriptor = Descriptor(d.Driver);
+        _previousDriver = d.Driver;
+        _values.Clear();
+        _extra.Clear();
+        foreach (var kv in d.Settings)
+        {
+            if (descriptor.Knows(kv.Key)) _values[kv.Key] = kv.Value;
+            else _extra.Add(new SettingRow { Key = kv.Key, Value = kv.Value });
+        }
+    }
+
+    /// <summary>
+    /// Lay out the newly chosen driver's own parameters, pre-filled with its defaults.
+    ///
+    /// <para>
+    /// What the operator actually typed survives the switch when the new driver declares the same
+    /// key — a Host is a Host. A value still sitting at the <em>old</em> driver's default does not:
+    /// carrying Modbus's port 502 over to an S7 connection that speaks on 102 hands the operator a
+    /// form that looks filled in and cannot connect.
+    /// </para>
+    /// </summary>
+    private void OnDriverChanged()
+    {
+        if (_edit is null) return;
+        var previous = Descriptor(_previousDriver);
+        var descriptor = Descriptor(_edit.Driver);
+        _previousDriver = _edit.Driver;
+
+        var kept = _values
+            .Where(kv => descriptor.Knows(kv.Key))
+            .Where(kv => !string.Equals(kv.Value, previous.Setting(kv.Key)?.Default, StringComparison.Ordinal))
+            .ToList();
+        _values.Clear();
+        foreach (var kv in kept)
+            _values[kv.Key] = kv.Value;
+        _extra.Clear();
+
+        // Only the everyday settings are pre-filled: writing every tuning knob into the project as
+        // an explicit copy of its default would freeze today's defaults into every connection.
+        foreach (var setting in descriptor.Settings.Where(s => !s.Advanced && !s.IsSecret))
+            if (!_values.ContainsKey(setting.Key) && !string.IsNullOrWhiteSpace(setting.Default))
+                _values[setting.Key] = setting.Default!;
+
+        if (_isNew && descriptor.DefaultScanIntervalMs > 0)
+            _edit.ScanIntervalMs = descriptor.DefaultScanIntervalMs;
+    }
+
+    private string ValueOf(DriverSetting setting) => _values.GetValueOrDefault(setting.Key, "");
+
+    private void SetValue(DriverSetting setting, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) _values.Remove(setting.Key);
+        else _values[setting.Key] = value.Trim();
     }
 
     private async Task SaveAsync()
@@ -247,9 +381,31 @@
         if (_edit is null) return;
         if (string.IsNullOrWhiteSpace(_edit.Id)) { Snackbar.Add("Connection Id is required.", Severity.Warning); return; }
 
-        _edit.Settings = _settings
-            .Where(s => !string.IsNullOrWhiteSpace(s.Key))
-            .ToDictionary(s => s.Key.Trim(), s => s.Value ?? "");
+        var descriptor = Descriptor(_edit.Driver);
+
+        // Say what is wrong here rather than letting the operator discover it as a rejected save:
+        // these are the very rules the server validates with.
+        var problems = descriptor.Settings
+            .Select(s => new { s, error = DriverSettingField.Validate(s, ValueOf(s)) })
+            .Where(x => x.error is not null)
+            .Select(x => $"{x.s.Label ?? x.s.Key}: {x.error}")
+            .ToList();
+        if (problems.Count > 0)
+        {
+            foreach (var problem in problems.Take(4))
+                Snackbar.Add(problem, Severity.Warning);
+            return;
+        }
+
+        var settings = new Dictionary<string, string>();
+        foreach (var setting in descriptor.Settings)
+        {
+            var value = ValueOf(setting);
+            if (!string.IsNullOrWhiteSpace(value)) settings[setting.Key] = value.Trim();
+        }
+        foreach (var row in _extra.Where(r => !string.IsNullOrWhiteSpace(r.Key)))
+            settings[row.Key.Trim()] = row.Value ?? "";
+        _edit.Settings = settings;
 
         _busy = true;
         try

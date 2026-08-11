@@ -71,3 +71,17 @@ public interface IDeviceDriverFactory
     /// </summary>
     DriverDescriptor Describe() => DriverDescriptor.Minimal(DriverType);
 }
+
+public static class DeviceDriverFactoryExtensions
+{
+    /// <summary>
+    /// <see cref="IDeviceDriverFactory.Describe"/> that cannot take the caller down with it. A driver
+    /// that throws while describing itself must still appear in the editor and still be validated —
+    /// as an undescribed driver, which checks nothing rather than refusing everything.
+    /// </summary>
+    public static DriverDescriptor SafeDescribe(this IDeviceDriverFactory factory)
+    {
+        try { return factory.Describe(); }
+        catch { return DriverDescriptor.Minimal(factory.DriverType); }
+    }
+}

@@ -524,11 +524,7 @@ public sealed class ProjectValidator
         }
     }
 
-    private static DriverDescriptor SafeDescribe(IDeviceDriverFactory factory)
-    {
-        try { return factory.Describe(); }
-        catch { return DriverDescriptor.Minimal(factory.DriverType); }
-    }
+    private static DriverDescriptor SafeDescribe(IDeviceDriverFactory factory) => factory.SafeDescribe();
 
     private static void ValidateSettings(IReadOnlyDictionary<string, string> settings,
         DriverDescriptor descriptor, List<string> problems)

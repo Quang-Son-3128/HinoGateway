@@ -35,6 +35,20 @@ public sealed class ConfigController : ControllerBase
     public IReadOnlyList<string> GetDrivers([FromServices] IEnumerable<IDeviceDriverFactory> factories) =>
         factories.Select(f => f.DriverType).OrderBy(x => x).ToList();
 
+    /// <summary>
+    /// What every installed driver says about itself: its settings with defaults, bounds and help,
+    /// its address syntax and the types it can decode. The connection editor builds its whole form
+    /// from this, so a driver that declares a Rack and a Slot gets a Rack and a Slot box without any
+    /// change in the client — which is the point of the descriptor.
+    /// </summary>
+    [HttpGet("driver-descriptors")]
+    public IReadOnlyList<DriverDescriptor> GetDriverDescriptors(
+        [FromServices] IEnumerable<IDeviceDriverFactory> factories) =>
+        factories
+            .Select(f => f.SafeDescribe())
+            .OrderBy(d => d.DriverType, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
     // --- connections ---------------------------------------------------------
 
     [HttpGet("devices")]

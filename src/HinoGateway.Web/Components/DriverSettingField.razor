@@ -1,0 +1,162 @@
+@* One connection setting, rendered from what the driver said about it. The editor never names a
+   protocol: a driver that declares Rack and Slot gets a Rack and a Slot box here, with its own
+   bounds and help, without a line changing in this file. *@
+
+<div style="@Style">
+    @switch (Setting.Kind)
+    {
+        case DriverSettingKind.Bool:
+            <MudTooltip Text="@Setting.Help" Placement="Placement.Top" Disabled="@(string.IsNullOrWhiteSpace(Setting.Help))">
+                <MudSwitch T="bool" Value="@AsBool" ValueChanged="OnBoolChanged" Color="Color.Primary"
+                           Label="@Label" Class="mt-2" />
+            </MudTooltip>
+            break;
+
+        case DriverSettingKind.Choice:
+            <MudSelect T="string" Value="@Value" ValueChanged="OnChanged" Label="@Label"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="@Helper"
+                       Error="@(Error is not null)" ErrorText="@Error" Style="width:100%">
+                @foreach (var choice in Setting.Choices)
+                {
+                    <MudSelectItem T="string" Value="@choice">@choice</MudSelectItem>
+                }
+            </MudSelect>
+            break;
+
+        case DriverSettingKind.Number:
+            @* Deliberately a text box holding the raw string: the project file stores settings as
+               invariant text, and round-tripping through a numeric control would rewrite "0.5" as
+               "0,5" on a machine with a comma decimal separator. *@
+            <MudTextField T="string" Value="@Value" ValueChanged="OnChanged" Label="@Label"
+                          InputType="InputType.Number" Immediate
+                          Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="@Helper"
+                          Placeholder="@Setting.Default"
+                          Error="@(Error is not null)" ErrorText="@Error" Style="width:100%" />
+            break;
+
+        default:
+            @if (Setting.IsSecret && SecretRef.IsReference(Value) && !_revealSecret)
+            {
+                <MudTextField T="string" Value="@("Stored on this gateway")" Label="@Label" ReadOnly Disabled
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Style="width:100%"
+                              Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Lock"
+                              HelperText="@Helper" />
+                <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Edit" Class="mt-1"
+                           OnClick="ReplaceSecret">Replace</MudButton>
+            }
+            else if (Setting.Suggestions.Count > 0)
+            {
+                @* Suggestions, not choices: the adapter for this port may well be unplugged right
+                   now, or the project may be prepared for another machine. *@
+                <MudAutocomplete T="string" Value="@Value" ValueChanged="OnChanged" Label="@Label"
+                                 SearchFunc="Search" CoerceValue CoerceText ResetValueOnEmptyText="false"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="@Helper"
+                                 Placeholder="@Setting.Default"
+                                 Error="@(Error is not null)" ErrorText="@Error" Style="width:100%" />
+            }
+            else
+            {
+                <MudTextField T="string" Value="@Value" ValueChanged="OnChanged" Label="@Label"
+                              InputType="@(Setting.IsSecret ? InputType.Password : InputType.Text)" Immediate
+                              Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="@Helper"
+                              Placeholder="@Setting.Default"
+                              Error="@(Error is not null)" ErrorText="@Error" Style="width:100%" />
+            }
+            break;
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public DriverSetting Setting { get; set; } = default!;
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    /// <summary>Sizing is the form's business, not the field's.</summary>
+    [Parameter] public string Style { get; set; } = "min-width:14rem";
+
+    private bool _revealSecret;
+
+    private string Label => (Setting.Label ?? Setting.Key) + (Setting.Required ? " *" : "");
+
+    private bool AsBool => bool.TryParse(Value, out var b) ? b : bool.TryParse(Setting.Default, out var d) && d;
+
+    /// <summary>
+    /// What the driver said, plus the bounds it will be judged against — an operator should not have
+    /// to save and read an error message to learn that a slot is 0-255.
+    /// </summary>
+    private string Helper
+    {
+        get
+        {
+            var range = Setting switch
+            {
+                { Min: { } min, Max: { } max } => $"{Trim(min)}–{Trim(max)}",
+                { Min: { } min } => $"≥ {Trim(min)}",
+                { Max: { } max } => $"≤ {Trim(max)}",
+                _ => null,
+            };
+            var parts = new List<string>(2);
+            if (!string.IsNullOrWhiteSpace(Setting.Help)) parts.Add(Setting.Help!);
+            if (range is not null) parts.Add(range);
+            return string.Join(" · ", parts);
+        }
+    }
+
+    private static string Trim(double value) =>
+        value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The problem with the current value, or null. Same rules the server validates with.</summary>
+    public string? Error => Validate(Setting, Value);
+
+    /// <summary>
+    /// Shared with the connection editor so the Save button and the field can never disagree about
+    /// whether a value is acceptable.
+    /// </summary>
+    public static string? Validate(DriverSetting setting, string? value)
+    {
+        var text = value?.Trim() ?? "";
+        if (text.Length == 0)
+            return setting.Required && string.IsNullOrWhiteSpace(setting.Default) ? "Required." : null;
+        if (setting.IsSecret || SecretRef.IsReference(text))
+            return null;
+
+        switch (setting.Kind)
+        {
+            case DriverSettingKind.Number:
+                if (!double.TryParse(text, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var number)
+                    || !double.IsFinite(number))
+                    return "Must be a number.";
+                if (setting.Min is { } min && number < min) return $"At least {Trim(min)}.";
+                if (setting.Max is { } max && number > max) return $"At most {Trim(max)}.";
+                return null;
+
+            case DriverSettingKind.Bool:
+                return bool.TryParse(text, out _) ? null : "Must be true or false.";
+
+            case DriverSettingKind.Choice:
+                return setting.Choices.Any(c => string.Equals(c, text, StringComparison.OrdinalIgnoreCase))
+                    ? null
+                    : $"One of: {string.Join(", ", setting.Choices)}.";
+
+            default:
+                return null;
+        }
+    }
+
+    private Task OnChanged(string? value) => ValueChanged.InvokeAsync(value ?? "");
+
+    private Task OnBoolChanged(bool value) =>
+        ValueChanged.InvokeAsync(value ? "true" : "false");
+
+    private async Task ReplaceSecret()
+    {
+        _revealSecret = true;
+        await ValueChanged.InvokeAsync("");
+    }
+
+    private Task<IEnumerable<string>> Search(string? text, CancellationToken ct) =>
+        Task.FromResult(string.IsNullOrWhiteSpace(text)
+            ? Setting.Suggestions.AsEnumerable()
+            : Setting.Suggestions.Where(s => s.Contains(text, StringComparison.OrdinalIgnoreCase)));
+}

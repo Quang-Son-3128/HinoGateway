@@ -167,12 +167,15 @@
                                 <MudSelectItem T="string" Value="@d.Id">@d.Id (@d.Driver)</MudSelectItem>
                             }
                         </MudSelect>
-                        <MudTextField T="string" @bind-Value="_tagEdit.Address" Label="Address" Placeholder="40001 / sine"
+                        @* Placeholder and hint come from the driver behind the chosen connection: an S7
+                           address is nothing like a Modbus one, and a shared example teaches neither. *@
+                        <MudTextField T="string" @bind-Value="_tagEdit.Address" Label="Address"
+                                      Placeholder="@AddressPlaceholder" HelperText="@EditDescriptor.AddressHelp"
                                       Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:10rem" />
                     }
                     <MudSelect T="DataType" @bind-Value="_tagEdit.DataType" Label="Data type"
                                Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:9rem">
-                        @foreach (var dt in Enum.GetValues<DataType>())
+                        @foreach (var dt in AllowedTypes)
                         {
                             <MudSelectItem T="DataType" Value="@dt">@dt</MudSelectItem>
                         }
@@ -242,6 +245,37 @@
                     }
                 </div>
 
+                @if (_tagEdit.Kind == TagKind.Device)
+                {
+                    var driver = EditDescriptor;
+                    @if (!string.IsNullOrWhiteSpace(driver.AddressSyntaxHelp))
+                    {
+                        <MudAlert Severity="Severity.Info" Dense Class="mt-3" Variant="Variant.Outlined">
+                            <b>@DriverLabel(driver):</b> @driver.AddressSyntaxHelp
+                            @if (driver.AddressExamples.Count > 0)
+                            {
+                                <span> e.g. </span>
+                                @for (var i = 0; i < driver.AddressExamples.Count; i++)
+                                {
+                                    @if (i > 0)
+                                    {
+                                        <span>, </span>
+                                    }
+                                    <code>@driver.AddressExamples[i]</code>
+                                }
+                            }
+                        </MudAlert>
+                    }
+                    @* The driver refuses a type it cannot decode, costing that tag its data. Better to
+                       say so here than to let the apply drop it. *@
+                    @if (driver.SupportedTypes.Count > 0 && !driver.SupportedTypes.Contains(_tagEdit.DataType))
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense Class="mt-2" Variant="Variant.Outlined">
+                            @($"{DriverLabel(driver)} cannot read {_tagEdit.DataType} — this tag will be dropped when the configuration is applied.")
+                        </MudAlert>
+                    }
+                }
+
                 @if (_tagEdit.Kind == TagKind.Expression)
                 {
                     <MudTextField T="string" Value="@(_tagEdit.Expression ?? "")" ValueChanged="OnExpressionChanged"
@@ -293,6 +327,7 @@
     private List<TagGroupDto> _groups = new();
     private List<TagDto> _tags = new();
     private List<DeviceDto> _devices = new();
+    private List<DriverDescriptor> _descriptors = new();
     private List<TreeItemData<string>> _tree = new();
     private string _selectedGroupId = RootId;
 
@@ -342,6 +377,50 @@
         }
     }
 
+    // --- what the driver behind a tag says about itself -----------------------
+
+    private DriverDescriptor Descriptor(string? deviceId)
+    {
+        var driver = _devices.FirstOrDefault(d => d.Id == deviceId)?.Driver;
+        return _descriptors.FirstOrDefault(x => string.Equals(x.DriverType, driver, StringComparison.OrdinalIgnoreCase))
+            ?? DriverDescriptor.Minimal(driver ?? "");
+    }
+
+    /// <summary>The driver of the connection currently chosen in the editor.</summary>
+    private DriverDescriptor EditDescriptor => Descriptor(_tagEdit?.DeviceId);
+
+    private static string DriverLabel(DriverDescriptor d) =>
+        string.IsNullOrWhiteSpace(d.DisplayName) ? d.DriverType : d.DisplayName;
+
+    private string AddressPlaceholder =>
+        EditDescriptor.AddressExample
+        ?? EditDescriptor.AddressExamples.FirstOrDefault()
+        ?? "40001 / sine";
+
+    /// <summary>
+    /// Only the types the driver can decode, for a device tag. A type it cannot read costs that tag
+    /// its data at apply time, so it has no business being offered here.
+    ///
+    /// <para>
+    /// A tag already stored with a type outside that list stays in the list: dropping it would make
+    /// the select show something the tag is not, and quietly rewrite it on the next save.
+    /// </para>
+    /// </summary>
+    private IEnumerable<DataType> AllowedTypes
+    {
+        get
+        {
+            var all = Enum.GetValues<DataType>();
+            if (_tagEdit is null || _tagEdit.Kind != TagKind.Device)
+                return all;
+
+            var supported = EditDescriptor.SupportedTypes;
+            return supported.Count == 0
+                ? all
+                : all.Where(t => supported.Contains(t) || t == _tagEdit.DataType);
+        }
+    }
+
     private string TagRowStyle(TagDto t, int _) =>
         t.Id == _highlightTagId
             ? "background:rgba(59,130,246,.16);box-shadow:inset 3px 0 0 var(--mud-palette-primary)"
@@ -355,6 +434,7 @@
             _groups = await Http.GetFromJsonAsync<List<TagGroupDto>>("api/config/groups") ?? new();
             _tags = await Http.GetFromJsonAsync<List<TagDto>>("api/config/tags") ?? new();
             _devices = await Http.GetFromJsonAsync<List<DeviceDto>>("api/config/devices") ?? new();
+            _descriptors = await Http.GetFromJsonAsync<List<DriverDescriptor>>("api/config/driver-descriptors") ?? new();
         }
         catch (Exception ex) when (ApiResponseErrors.IsUnauthorized(ex))
         {

@@ -521,6 +521,8 @@ public sealed class InternalTagEngine : IAsyncDisposable
             throw new NotSupportedException(
                 $"Tag '{tagId}' is calculated by an expression; the next evaluation would overwrite anything written to it.");
 
+        TagWritePolicy.EnsureAllowed(entry.Definition, value);
+
         if (!InternalTagValues.TryCoerce(entry.Definition.DataType, value, out var typed, out var error))
             throw new ArgumentException($"Cannot write to '{tagId}': {error}");
 

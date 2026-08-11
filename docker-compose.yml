@@ -9,7 +9,13 @@ services:
       - "2000:2000"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+      - Data__Root=/var/lib/hinogateway
+    volumes:
+      - hinogateway-data:/var/lib/hinogateway
     restart: unless-stopped
     # For real serial drivers later, pass the device through, e.g.:
     # devices:
     #   - "/dev/ttyUSB0:/dev/ttyUSB0"
+
+volumes:
+  hinogateway-data:

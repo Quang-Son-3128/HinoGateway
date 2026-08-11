@@ -19,7 +19,8 @@ public class RuntimeReloadTests
             Id = $"{id}.Tag{i}",
             Name = $"Tag{i}",
             Address = "sine",
-            DataType = DataType.Float64,
+                DataType = DataType.Float64,
+                AllowWrite = true,
         }).ToList();
 
         return new DeviceConfig
@@ -104,11 +105,12 @@ public class RuntimeReloadTests
         var applied = await engine.LoadAsync([Sim("SIM-1"), broken]);
         engine.StartAll();
 
-        Assert.Equal(1, applied.Started);
-        var rejected = Assert.Single(applied.Rejected);
-        Assert.Equal("MB-BAD", rejected.DeviceId);
-        Assert.Equal(DeviceState.Faulted, rejected.State);
-        Assert.Contains("not-an-address", rejected.LastError);
+        Assert.Equal(2, applied.Started);
+        Assert.Empty(applied.Rejected);
+        var dropped = Assert.Single(applied.DroppedTags);
+        Assert.Equal("MB-BAD", dropped.DeviceId);
+        Assert.Equal("MB-BAD.X", dropped.TagId);
+        Assert.Contains("not-an-address", dropped.Reason);
 
         // The healthy connection is unaffected...
         var value = await WaitForQualityAsync(store, "SIM-1.Tag1", Quality.Good, TimeSpan.FromSeconds(5));

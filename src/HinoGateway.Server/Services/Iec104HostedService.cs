@@ -17,6 +17,9 @@ public sealed class Iec104HostedService : IHostedService
 {
     private readonly IServiceProvider _services;
     private readonly DeviceEngine _engine;
+    private readonly ControlCommandService _commands;
+    private readonly AuditTrail _audit;
+    private readonly ComponentHealthRegistry _health;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<Iec104HostedService> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -25,11 +28,15 @@ public sealed class Iec104HostedService : IHostedService
     private Iec104ServerOptions _options = new();
     private string? _startError;
 
-    public Iec104HostedService(IServiceProvider services, DeviceEngine engine,
+    public Iec104HostedService(IServiceProvider services, DeviceEngine engine, ControlCommandService commands, AuditTrail audit,
+        ComponentHealthRegistry health,
         ILoggerFactory loggerFactory, ILogger<Iec104HostedService> logger)
     {
         _services = services;
         _engine = engine;
+        _commands = commands;
+        _audit = audit;
+        _health = health;
         _loggerFactory = loggerFactory;
         _logger = logger;
     }
@@ -75,7 +82,7 @@ public sealed class Iec104HostedService : IHostedService
             }
 
             var server = new Iec104Server(_options, _engine.Tags, WriteTagAsync,
-                _loggerFactory.CreateLogger<Iec104Server>());
+                _loggerFactory.CreateLogger<Iec104Server>(), AuditAsync, ObserveLoop);
             try
             {
                 server.Start();
@@ -121,6 +128,25 @@ public sealed class Iec104HostedService : IHostedService
             Warning: null);
     }
 
-    private Task WriteTagAsync(string tagPath, object value, CancellationToken ct) =>
-        _engine.WriteTagAsync(tagPath, value, ct);
+    private async Task WriteTagAsync(string tagPath, object value, string? remoteAddress, CancellationToken ct)
+    {
+        var result = await _commands.ExecuteAsync(new ControlCommand(
+            tagPath, value, "IEC104", remoteAddress ?? "iec104-control-centre", remoteAddress),
+            _options.CommandTimeoutMs, ct);
+        if (result.Outcome != ControlOutcome.Successful)
+            throw result.Outcome == ControlOutcome.Unknown
+                ? new TimeoutException(result.Reason)
+                : new InvalidOperationException(result.Reason);
+    }
+
+    private Task AuditAsync(Iec104ControlAudit entry) => _audit.WriteAsync(new GatewayAuditEvent(
+        entry.Timestamp, $"iec104.{entry.Action}", entry.RemoteAddress, "IEC104", entry.RemoteAddress,
+        entry.TagPath ?? $"IOA:{entry.Ioa}", entry.Outcome, Value: entry.Value, Reason: entry.Reason));
+
+    private void ObserveLoop(string loop, Exception? failure)
+    {
+        var name = $"iec104-{loop.Replace(' ', '-')}";
+        if (failure is null) _health.Heartbeat(name);
+        else _health.Failed(name, failure);
+    }
 }

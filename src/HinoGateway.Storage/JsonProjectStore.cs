@@ -40,11 +40,15 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     {
         _path = System.IO.Path.GetFullPath(path);
         _logger = logger;
+        WasMissingAtStartup = !File.Exists(_path);
         Load();
     }
 
     /// <summary>Absolute path of the project file backing this store.</summary>
     public string FilePath => _path;
+
+    /// <summary>True only when no project file existed before this process started.</summary>
+    public bool WasMissingAtStartup { get; }
 
     /// <summary>True when the file did not exist at startup (a fresh install to be seeded).</summary>
     public bool IsEmpty
@@ -89,27 +93,53 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     }
 
     /// <summary>Version 1 files nested tags under their device; lift them into one folder per device.</summary>
-    private static void Normalise(HinoProject project)
+    public static void Normalise(HinoProject project)
     {
-        if (project.Version >= 2)
-            return;
+        project.Devices ??= new();
+        project.Groups ??= new();
+        project.Tags ??= new();
+        project.Alarms ??= new();
 
-        foreach (var device in project.Devices)
+        if (project.Version < 2)
         {
-            if (device.Tags.Count == 0)
-                continue;
-
-            var group = new TagGroupDto { Id = $"imp-{device.Id}", Name = device.Id };
-            project.Groups.Add(group);
-            foreach (var tag in device.Tags)
+            foreach (var device in project.Devices)
             {
-                tag.Id = string.IsNullOrWhiteSpace(tag.Id) ? Guid.NewGuid().ToString("N") : tag.Id;
-                tag.GroupId = group.Id;
-                tag.DeviceId = device.Id;
-                project.Tags.Add(tag);
+                if (device.Tags.Count == 0)
+                    continue;
+
+                var group = new TagGroupDto { Id = $"imp-{device.Id}", Name = device.Id };
+                project.Groups.Add(group);
+                foreach (var tag in device.Tags)
+                {
+                    tag.Id = string.IsNullOrWhiteSpace(tag.Id) ? Guid.NewGuid().ToString("N") : tag.Id;
+                    tag.GroupId = group.Id;
+                    tag.DeviceId = device.Id;
+                    project.Tags.Add(tag);
+                }
+                device.Tags.Clear();
             }
-            device.Tags.Clear();
         }
+
+        // Version 7 split "this point is commandable" into two explicit switches: select-before-operate
+        // on the IEC point, and AllowWrite on the tag itself. Both halves have to be migrated together.
+        // In a version 6 file, mapping a point as commandable WAS the authorisation — so carrying only
+        // RequireSelect across left every such tag read-only, and the project validator then rejected
+        // the whole file. That turned a routine restore from a .hino backup into a dead end, with an
+        // error message about a safety switch rather than about the file's age.
+        if (project.Version < 7 && project.Iec104 is not null)
+        {
+            var commandedTagIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var point in project.Iec104.Points.Where(p => p.Command != Iec104CommandType.None))
+            {
+                if (point.Command is Iec104CommandType.SingleCommand or Iec104CommandType.DoubleCommand)
+                    point.RequireSelect = true;
+                if (!string.IsNullOrEmpty(point.TagId))
+                    commandedTagIds.Add(point.TagId);
+            }
+            foreach (var tag in project.Tags.Where(t => commandedTagIds.Contains(t.Id)))
+                tag.AllowWrite = true;
+        }
+
         project.Version = HinoProject.CurrentVersion;
     }
 
@@ -196,19 +226,10 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
             json = JsonSerializer.Serialize(_project, Json);
         }
 
-        var temp = _path + ".tmp";
         var backup = _path + ".bak";
         try
         {
-            var directory = System.IO.Path.GetDirectoryName(_path);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-
-            File.WriteAllText(temp, json);
-            if (File.Exists(_path))
-                File.Replace(temp, _path, backup, ignoreMetadataErrors: true);  // atomic, keeps a backup
-            else
-                File.Move(temp, _path);
+            DurableAtomicFile.WriteAllText(_path, json, backup);
         }
         catch (Exception ex)
         {
@@ -216,7 +237,6 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
             // request must still fail: returning success here tells the operator that a change is
             // durable when it will disappear at the next restart.
             _logger.LogError(ex, "Could not write the project file {Path} — the change is live but NOT persisted", _path);
-            try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best effort */ }
             throw new ConfigurationPersistenceException(_path,
                 $"Could not persist the gateway project to '{_path}'. The change is live in memory but will not survive a restart.", ex);
         }
@@ -439,6 +459,9 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
                     DataType = t.DataType,
                     Unit = t.Unit,
                     Description = t.Description,
+                    AllowWrite = t.AllowWrite,
+                    WriteMin = t.WriteMin,
+                    WriteMax = t.WriteMax,
                     // Scale/Offset are deliberately not carried: they are applied by the device
                     // worker on a raw device reading, and an internal tag has none. An expression
                     // does its own arithmetic; a memory tag holds what was written to it.
@@ -672,6 +695,9 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
             Description = t.Description,
             Scale = t.Scale,
             Offset = t.Offset,
+            AllowWrite = t.AllowWrite,
+            WriteMin = t.WriteMin,
+            WriteMax = t.WriteMax,
             Monotonic = t.Monotonic,
             ScanInterval = TagScanRate.FromMilliseconds(t.ScanIntervalMs),
         }).ToList(),
@@ -699,6 +725,9 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
         Description = t.Description,
         Scale = t.Scale,
         Offset = t.Offset,
+        AllowWrite = t.AllowWrite,
+        WriteMin = t.WriteMin,
+        WriteMax = t.WriteMax,
         Monotonic = t.Monotonic,
         ScanIntervalMs = t.ScanIntervalMs,
     };

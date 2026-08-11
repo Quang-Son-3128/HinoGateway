@@ -1,0 +1,36 @@
+@page "/access"
+@inject HinoGateway.Web.Security.ApiKeyStore Keys
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+
+<PageTitle>HinoGateway — Access</PageTitle>
+<MudPaper Class="pa-5" Outlined Elevation="0" Style="max-width:40rem">
+    <MudText Typo="Typo.h5">Remote access</MudText>
+    <MudText Typo="Typo.body2" Class="my-3" Style="opacity:.75">
+        Enter an API key configured on the gateway. It is kept only in this browser tab and is sent
+        over HTTPS with API and realtime connections.
+    </MudText>
+    <MudTextField @bind-Value="_key" Label="API key" InputType="InputType.Password"
+                  Variant="Variant.Outlined" Immediate />
+    <div class="d-flex mt-3" style="gap:.6rem">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync">Use key</MudButton>
+        <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="ClearAsync">Forget key</MudButton>
+    </div>
+</MudPaper>
+
+@code {
+    private string _key = "";
+    protected override async Task OnInitializedAsync() => _key = await Keys.GetAsync() ?? "";
+    private async Task SaveAsync()
+    {
+        await Keys.SetAsync(_key);
+        try
+        {
+            using var response = await Http.GetAsync("api/stats");
+            Snackbar.Add(response.IsSuccessStatusCode ? "API key accepted." : "The gateway rejected this key.",
+                response.IsSuccessStatusCode ? Severity.Success : Severity.Error);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+    private async Task ClearAsync() { _key = ""; await Keys.SetAsync(null); Snackbar.Add("API key removed.", Severity.Info); }
+}

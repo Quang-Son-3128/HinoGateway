@@ -102,6 +102,9 @@
             </MudSelect>
             <MudNumericField T="int" @bind-Value="_edit.ScanIntervalMs" Label="Scan interval (ms)" Min="50"
                              Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:10rem" />
+            <MudNumericField T="int" @bind-Value="_edit.FailureThreshold" Label="Failures before reconnect"
+                             Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense"
+                             Style="min-width:13rem" HelperText="Fatal link errors still reconnect immediately" />
         </div>
 
         <MudText Typo="Typo.subtitle2" Class="mt-4 mb-1">Settings</MudText>
@@ -233,6 +236,7 @@
             Id = d.Id,
             Driver = d.Driver,
             ScanIntervalMs = d.ScanIntervalMs,
+            FailureThreshold = d.FailureThreshold,
             Settings = new(d.Settings),
         };
         SyncSettingsFromEdit();

@@ -21,7 +21,7 @@ namespace HinoGateway.Core;
 public sealed class HinoProject
 {
     public const string FormatTag = "hino-project";
-    public const int CurrentVersion = 6;
+    public const int CurrentVersion = 7;
 
     public string Format { get; set; } = FormatTag;
     public int Version { get; set; } = CurrentVersion;

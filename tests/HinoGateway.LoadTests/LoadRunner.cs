@@ -9,12 +9,20 @@ namespace HinoGateway.LoadTests;
 public sealed record ScenarioStats(SlaveKind Kind, int Devices, int Connected, double PollsPerDevice,
     int GoodTags, int BadTags, int MissingTags);
 
+public sealed record ReloadStats(int Count, long LastMs, long MinMs, long MaxMs, long P95Ms,
+    IReadOnlyList<long> ManagedHeapCheckpointsMb);
+
 public sealed record LoadResult(
     LoadProfile Profile, IReadOnlyList<ScenarioStats> Scenarios, double ExpectedPolls,
     double ElapsedSeconds, double MeasuredSeconds, double CpuSeconds, long WorkingSetMb,
-    int OsThreads, int PeakPoolBusy, double MaxSampleLatenessSeconds, long StartupMs, long HotReloadMs,
+    int OsThreads, long SlaveWorkingSetMb, int SlaveThreads,
+    long PeakWorkingSetMb, int Gen0Collections, int Gen1Collections, int Gen2Collections, long AllocatedMb,
+    long ManagedHeapMb, long PeakManagedHeapMb, long ManagedGrowthMb, long FragmentedHeapMb,
+    long PrivateMemoryMb, int HandleCount, ReloadStats Reloads,
+    int PeakPoolBusy, double MaxSampleLatenessSeconds, long StartupMs, long HotReloadMs,
     int Rejected, int DroppedTags, long NorthboundBatches, long NorthboundSamples, long NorthboundDropped,
-    long DiagnosticsCalls, long DiagnosticsFaults, string? DiagnosticsLastFault, long ObserverErrors)
+    long DiagnosticsCalls, long DiagnosticsFaults, string? DiagnosticsLastFault, long ObserverErrors,
+    FullStackStats? FullStack)
 {
     public double CpuPercentOfMachine => ElapsedSeconds <= 0 ? 0
         : CpuSeconds / ElapsedSeconds / Environment.ProcessorCount * 100;
@@ -32,8 +40,7 @@ public static class LoadRunner
         }
 
         var population = profile.BuildPopulation();
-        await using var farm = new SlaveFarm();
-        farm.Start(population, profile.LinkLatencyMs);
+        await using var farm = await ExternalSlaveFarm.StartAsync(population, profile.LinkLatencyMs);
         var configs = BuildConfigs(profile, population, farm.Ports);
 
         using var loggerFactory = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Warning));
@@ -68,10 +75,18 @@ public static class LoadRunner
         });
 
         var proc = Process.GetCurrentProcess();
+        var managedBaseline = GC.GetTotalMemory(forceFullCollection: true);
+        var peakManaged = managedBaseline;
         var cpu0 = proc.TotalProcessorTime;
+        var gc0 = new[] { GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2) };
+        var allocated0 = GC.GetTotalAllocatedBytes();
+        var peakWorkingSet = proc.WorkingSet64;
         var total = Stopwatch.StartNew();
         var startup = Stopwatch.StartNew();
         var apply = await engine.LoadAsync(configs);
+        FullStackProbe? fullStack = null;
+        if (profile.FullStack)
+            fullStack = await FullStackProbe.StartAsync(engine, store, configs, loggerFactory);
         engine.StartAll();
         startup.Stop();
 
@@ -80,6 +95,12 @@ public static class LoadRunner
         var samplePeriod = TimeSpan.FromSeconds(1);
         var nextSample = Stopwatch.GetTimestamp() + (long)(samplePeriod.TotalSeconds * Stopwatch.Frequency);
         var endAt = DateTimeOffset.UtcNow.AddSeconds(Math.Max(1, profile.RunSeconds));
+        var reloadAt = DateTimeOffset.UtcNow.AddSeconds(profile.ReloadEverySeconds > 0
+            ? profile.ReloadEverySeconds : Math.Max(1, profile.RunSeconds) / 2d);
+        var hotReloadMs = 0L;
+        var reloadDurations = new List<long>();
+        var managedCheckpoints = new List<long>();
+        var pollsBeforeReload = new Dictionary<string, long>(StringComparer.Ordinal);
         while (DateTimeOffset.UtcNow < endAt)
         {
             await Task.Delay(samplePeriod);
@@ -89,7 +110,39 @@ public static class LoadRunner
             ThreadPool.GetAvailableThreads(out var available, out _);
             ThreadPool.GetMaxThreads(out var max, out _);
             peakPoolBusy = Math.Max(peakPoolBusy, max - available);
+            proc.Refresh();
+            peakWorkingSet = Math.Max(peakWorkingSet, proc.WorkingSet64);
+            peakManaged = Math.Max(peakManaged, GC.GetTotalMemory(forceFullCollection: false));
+            if ((profile.FullStack || profile.ReloadEverySeconds > 0) && DateTimeOffset.UtcNow >= reloadAt)
+            {
+                foreach (var device in engine.Health)
+                    pollsBeforeReload[device.DeviceId] = pollsBeforeReload.GetValueOrDefault(device.DeviceId) + device.PollCount;
+                var reload = Stopwatch.StartNew();
+                await engine.ReloadAsync(configs);
+                reload.Stop();
+                hotReloadMs = Math.Max(1, reload.ElapsedMilliseconds);
+                reloadDurations.Add(Math.Max(1, reload.ElapsedMilliseconds));
+                var forceGc = profile.ForcedGcEveryReloads > 0
+                              && reloadDurations.Count % profile.ForcedGcEveryReloads == 0;
+                var checkpoint = GC.GetTotalMemory(forceGc);
+                peakManaged = Math.Max(peakManaged, checkpoint);
+                managedCheckpoints.Add(checkpoint / 1024 / 1024);
+                reloadAt = profile.ReloadEverySeconds > 0
+                    ? DateTimeOffset.UtcNow.AddSeconds(profile.ReloadEverySeconds)
+                    : DateTimeOffset.MaxValue;
+            }
         }
+
+        // A sample taken on the same millisecond as a hot reload only measures how fast the status
+        // endpoint can observe Connecting. Give reachable links a bounded recovery window and then
+        // judge their steady state; failure to recover inside it still fails the profile.
+        var reachableIds = population.Select((kind, index) => (kind, id: $"load-{index:D4}"))
+            .Where(x => x.kind is SlaveKind.Healthy or SlaveKind.Slow)
+            .Select(x => x.id).ToHashSet(StringComparer.Ordinal);
+        var recoveryDeadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (DateTimeOffset.UtcNow < recoveryDeadline
+               && engine.Health.Where(h => reachableIds.Contains(h.DeviceId)).Any(h => h.State != DeviceState.Connected))
+            await Task.Delay(100);
 
         total.Stop();
         runCts.Cancel();
@@ -107,19 +160,45 @@ public static class LoadRunner
                 var present = tagIds.Where(values.ContainsKey).ToList();
                 return new ScenarioStats(group.Key, deviceIds.Count,
                     deviceHealth.Count(h => h.State == DeviceState.Connected),
-                    deviceHealth.Count == 0 ? 0 : deviceHealth.Average(h => h.PollCount),
+                    deviceHealth.Count == 0 ? 0 : deviceHealth.Average(h => h.PollCount
+                        + pollsBeforeReload.GetValueOrDefault(h.DeviceId)),
                     present.Count(id => values[id].Quality == Quality.Good),
                     present.Count(id => values[id].Quality == Quality.Bad),
                     tagIds.Count - present.Count);
             }).OrderBy(s => s.Kind).ToList();
 
         proc.Refresh();
+        var finalManaged = GC.GetTotalMemory(forceFullCollection: reloadDurations.Count > 0);
+        peakManaged = Math.Max(peakManaged, finalManaged);
+        var gcInfo = GC.GetGCMemoryInfo();
+        var orderedReloads = reloadDurations.OrderBy(x => x).ToArray();
+        var p95Index = orderedReloads.Length == 0 ? 0
+            : Math.Clamp((int)Math.Ceiling(orderedReloads.Length * 0.95) - 1, 0, orderedReloads.Length - 1);
+        var reloadStats = new ReloadStats(orderedReloads.Length,
+            reloadDurations.LastOrDefault(), orderedReloads.FirstOrDefault(), orderedReloads.LastOrDefault(),
+            orderedReloads.Length == 0 ? 0 : orderedReloads[p95Index], managedCheckpoints);
         var cpuSeconds = (proc.TotalProcessorTime - cpu0).TotalSeconds;
+        var fullStackStats = fullStack?.Snapshot();
+        if (fullStack is not null)
+            await fullStack.DisposeAsync();
         return new LoadResult(profile, scenarios, profile.RunSeconds * 1000d / profile.ScanMs,
             total.Elapsed.TotalSeconds, profile.RunSeconds, cpuSeconds, proc.WorkingSet64 / 1024 / 1024,
-            proc.Threads.Count, peakPoolBusy, maxLateness, startup.ElapsedMilliseconds, 0,
+            proc.Threads.Count, farm.WorkingSetMb, farm.Threads,
+            peakWorkingSet / 1024 / 1024, GC.CollectionCount(0) - gc0[0], GC.CollectionCount(1) - gc0[1],
+            GC.CollectionCount(2) - gc0[2], (GC.GetTotalAllocatedBytes() - allocated0) / 1024 / 1024,
+            finalManaged / 1024 / 1024, peakManaged / 1024 / 1024,
+            (finalManaged - managedBaseline) / 1024 / 1024, gcInfo.FragmentedBytes / 1024 / 1024,
+            proc.PrivateMemorySize64 / 1024 / 1024, SafeHandleCount(proc), reloadStats,
+            peakPoolBusy, maxLateness, startup.ElapsedMilliseconds, hotReloadMs,
             apply.Rejected.Count, apply.DroppedTags.Count, northboundBatches, northboundSamples,
-            northbound.Dropped, diagnosticsCalls, diagnosticsFaults, diagnosticsLastFault, store.ObserverErrors);
+            northbound.Dropped, diagnosticsCalls, diagnosticsFaults, diagnosticsLastFault, store.ObserverErrors,
+            fullStackStats);
+    }
+
+    private static int SafeHandleCount(Process process)
+    {
+        try { return process.HandleCount; }
+        catch (PlatformNotSupportedException) { return -1; }
     }
 
     private static List<DeviceConfig> BuildConfigs(LoadProfile profile, IReadOnlyList<SlaveKind> population,

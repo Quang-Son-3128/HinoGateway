@@ -99,18 +99,9 @@ public sealed class RetainedValueStore : IRetainedValueStore, IDisposable
 
         lock (_writeGate)
         {
-            var temp = _path + ".tmp";
             try
             {
-                var directory = Path.GetDirectoryName(_path);
-                if (!string.IsNullOrEmpty(directory))
-                    Directory.CreateDirectory(directory);
-
-                File.WriteAllText(temp, JsonSerializer.Serialize(file, Json));
-                if (File.Exists(_path))
-                    File.Replace(temp, _path, null, ignoreMetadataErrors: true);
-                else
-                    File.Move(temp, _path);
+                DurableAtomicFile.WriteAllText(_path, JsonSerializer.Serialize(file, Json));
             }
             catch (Exception ex)
             {
@@ -119,7 +110,6 @@ public sealed class RetainedValueStore : IRetainedValueStore, IDisposable
                 // would misreport what actually happened. The log is the honest place for this.
                 _logger.LogError(ex, "Could not write retained tag values to {Path}; " +
                                      "they are live but will not survive a restart", _path);
-                try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best effort */ }
             }
         }
     }

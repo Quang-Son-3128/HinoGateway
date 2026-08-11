@@ -54,6 +54,50 @@ public class DeviceEngineTests
         await engine.DisposeAsync();
     }
 
+    [Fact]
+    public async Task Transient_poll_failures_are_tolerated_up_to_the_configured_threshold()
+    {
+        var store = new TagStore();
+        var driver = new SequenceDriver(fatal: false);
+        var observed = new List<Quality>();
+        store.AddObserver(reads =>
+        {
+            lock (observed)
+                observed.AddRange(reads.Select(r => r.Value.Quality));
+        });
+        await using var worker = new DeviceWorker(
+            SimDevice("TOL", "Sequence") with { FailureThreshold = 3 },
+            driver, store, NullLogger.Instance);
+
+        worker.Start();
+        await WaitForAsync(() => driver.Polls >= 3, TimeSpan.FromSeconds(2));
+
+        Assert.Equal(1, driver.Connects);
+        lock (observed)
+        {
+            Assert.Contains(Quality.Uncertain, observed);
+            Assert.DoesNotContain(Quality.Bad, observed);
+        }
+        Assert.True(store.TryGet("TOL.Sine", out var latest));
+        Assert.Equal(Quality.Good, latest.Quality);
+    }
+
+    [Fact]
+    public async Task A_proven_dead_transport_reconnects_without_waiting_for_the_threshold()
+    {
+        var store = new TagStore();
+        var driver = new SequenceDriver(fatal: true);
+        await using var worker = new DeviceWorker(
+            SimDevice("FATAL", "Sequence") with { FailureThreshold = 100 },
+            driver, store, NullLogger.Instance);
+
+        worker.Start();
+        await WaitForAsync(() => driver.Connects >= 2, TimeSpan.FromSeconds(3));
+
+        Assert.Equal(2, driver.Polls);
+        Assert.True(driver.Disconnects >= 1);
+    }
+
     private static Task<TagValue> WaitForGoodAsync(TagStore store, string tagId, TimeSpan timeout) =>
         WaitForQualityAsync(store, tagId, Quality.Good, timeout);
 
@@ -68,6 +112,17 @@ public class DeviceEngineTests
         }
 
         throw new TimeoutException($"Tag '{tagId}' did not reach quality {quality} within {timeout}.");
+    }
+
+    private static async Task WaitForAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (condition()) return;
+            await Task.Delay(10);
+        }
+        throw new TimeoutException("Condition was not reached in time.");
     }
 
     // A driver that always fails on poll, to exercise fault isolation + Bad-quality marking.
@@ -85,5 +140,39 @@ public class DeviceEngineTests
     {
         public string DriverType => "Faulting";
         public IDeviceDriver Create(DeviceConfig config) => new FaultingDriver();
+    }
+
+    private sealed class SequenceDriver(bool fatal) : IDeviceDriver, ITransportFaultClassifier
+    {
+        private int _connects, _disconnects, _polls;
+        public int Connects => Volatile.Read(ref _connects);
+        public int Disconnects => Volatile.Read(ref _disconnects);
+        public int Polls => Volatile.Read(ref _polls);
+
+        public Task ConnectAsync(CancellationToken ct)
+        {
+            Interlocked.Increment(ref _connects);
+            return Task.CompletedTask;
+        }
+
+        public Task DisconnectAsync(CancellationToken ct)
+        {
+            Interlocked.Increment(ref _disconnects);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<TagRead>> PollAsync(CancellationToken ct)
+        {
+            var poll = Interlocked.Increment(ref _polls);
+            if (poll == 2)
+                throw new IOException("one missed response");
+            IReadOnlyList<TagRead> reads =
+                [new("TOL.Sine", TagValue.Good((double)poll, DateTimeOffset.UtcNow))];
+            return Task.FromResult(reads);
+        }
+
+        public bool IsTransportFault(Exception exception) => fatal;
+        public Task WriteAsync(string tagId, object value, CancellationToken ct) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

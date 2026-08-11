@@ -30,3 +30,13 @@ public interface IDeviceDriver : IAsyncDisposable
     /// <summary>Close the connection. Should not throw; best-effort cleanup.</summary>
     Task DisconnectAsync(CancellationToken ct);
 }
+
+/// <summary>
+/// Optional capability for a driver that can tell a transient request failure from proof that its
+/// underlying connection is gone. Fatal transport failures bypass the configured consecutive-failure
+/// tolerance because waiting through more polls on a dead socket only delays recovery.
+/// </summary>
+public interface ITransportFaultClassifier
+{
+    bool IsTransportFault(Exception exception);
+}

@@ -21,58 +21,68 @@ public sealed record ModbusPoint(TagDefinition Tag, ModbusAddress Addr, int Regi
 /// </summary>
 public sealed class ModbusReadBlock
 {
-    public ModbusReadBlock(ModbusRegisterType area, ushort start, ushort count, List<ModbusPoint> points)
+    private readonly object _statsGate = new();
+    public ModbusReadBlock(ModbusRegisterType area, ushort start, ushort count, List<ModbusPoint> points,
+        TimeSpan? scanInterval = null)
     {
         Area = area;
         Start = start;
         Count = count;
         Points = points;
+        ScanInterval = scanInterval;
     }
 
     public ModbusRegisterType Area { get; }
     public ushort Start { get; }
     public ushort Count { get; }
     public List<ModbusPoint> Points { get; }
+    public TimeSpan? ScanInterval { get; }
 
     public long Reads { get; private set; }
     public long Errors { get; private set; }
     public double LastLatencyMs { get; private set; }
     public string? LastError { get; private set; }
     public DateTimeOffset? QuarantinedUntil { get; private set; }
+    public DateTimeOffset? NextDueAt { get; private set; }
 
-    public bool IsQuarantined(DateTimeOffset now) => QuarantinedUntil is { } until && now < until;
+    public bool IsQuarantined(DateTimeOffset now) { lock (_statsGate) return QuarantinedUntil is { } until && now < until; }
+    public bool IsDue(DateTimeOffset now) { lock (_statsGate) return ScanInterval is null || NextDueAt is not { } due || now >= due; }
+
+    public void MarkPolled(DateTimeOffset now)
+    {
+        lock (_statsGate)
+            if (ScanInterval is { } interval) NextDueAt = now + interval;
+    }
 
     public void RecordSuccess(double latencyMs)
     {
-        Reads++;
-        LastLatencyMs = latencyMs;
-        LastError = null;
-        QuarantinedUntil = null;
+        lock (_statsGate)
+        {
+            Reads++;
+            LastLatencyMs = latencyMs;
+            LastError = null;
+            QuarantinedUntil = null;
+        }
     }
 
     public void RecordError(string error)
     {
-        Errors++;
-        LastError = error;
+        lock (_statsGate) { Errors++; LastError = error; }
     }
 
     /// <summary>Stop asking for this range until <paramref name="until"/> — the device refuses it.</summary>
     public void Quarantine(DateTimeOffset until, string reason)
     {
-        QuarantinedUntil = until;
-        LastError = reason;
+        lock (_statsGate) { QuarantinedUntil = until; LastError = reason; }
     }
 
-    public DriverBlockStat ToStat(DateTimeOffset now) => new(
-        Area: AreaName(Area),
-        Start: Start,
-        Count: Count,
-        Tags: Points.Count,
-        Reads: Reads,
-        Errors: Errors,
-        LastLatencyMs: LastLatencyMs,
-        LastError: LastError,
-        Quarantined: IsQuarantined(now));
+    public DriverBlockStat ToStat(DateTimeOffset now)
+    {
+        lock (_statsGate)
+            return new DriverBlockStat(AreaName(Area), Start, Count, Points.Count, Reads, Errors,
+                LastLatencyMs, LastError, QuarantinedUntil is { } until && now < until)
+            { ScanIntervalMs = ScanInterval is { } interval ? (int)interval.TotalMilliseconds : 0 };
+    }
 
     public static string AreaName(ModbusRegisterType area) => area switch
     {
@@ -113,17 +123,21 @@ public static class ModbusReadPlan
                  })
         {
             var bits = area is ModbusRegisterType.Coil or ModbusRegisterType.DiscreteInput;
-            blocks.AddRange(BuildArea(
-                points.Where(p => p.Addr.Type == area),
-                area,
-                maxGap: bits ? maxBitGap : maxRegisterGap,
-                maxSpan: bits ? MaxBitsPerRead : MaxRegistersPerRead));
+            foreach (var rateGroup in points.Where(p => p.Addr.Type == area).GroupBy(p => p.Tag.ScanInterval))
+            {
+                blocks.AddRange(BuildArea(
+                    rateGroup,
+                    area,
+                    maxGap: bits ? maxBitGap : maxRegisterGap,
+                    maxSpan: bits ? MaxBitsPerRead : MaxRegistersPerRead,
+                    scanInterval: rateGroup.Key));
+            }
         }
         return blocks;
     }
 
     private static List<ModbusReadBlock> BuildArea(IEnumerable<ModbusPoint> areaPoints,
-        ModbusRegisterType area, int maxGap, int maxSpan)
+        ModbusRegisterType area, int maxGap, int maxSpan, TimeSpan? scanInterval)
     {
         var blocks = new List<ModbusReadBlock>();
         var ordered = areaPoints.OrderBy(p => p.Start).ThenBy(p => p.End).ToList();
@@ -141,7 +155,7 @@ public static class ModbusReadPlan
 
             if (gap > maxGap || span > maxSpan)
             {
-                blocks.Add(Close(area, start, end, current));
+                blocks.Add(Close(area, start, end, current, scanInterval));
                 current = new List<ModbusPoint> { point };
                 start = point.Start;
                 end = point.End;
@@ -152,12 +166,13 @@ public static class ModbusReadPlan
             end = Math.Max(end, point.End);
         }
 
-        blocks.Add(Close(area, start, end, current));
+        blocks.Add(Close(area, start, end, current, scanInterval));
         return blocks;
     }
 
-    private static ModbusReadBlock Close(ModbusRegisterType area, int start, int end, List<ModbusPoint> points) =>
-        new(area, (ushort)start, (ushort)(end - start), points);
+    private static ModbusReadBlock Close(ModbusRegisterType area, int start, int end, List<ModbusPoint> points,
+        TimeSpan? scanInterval) =>
+        new(area, (ushort)start, (ushort)(end - start), points, scanInterval);
 
     /// <summary>
     /// Split a refused block in two so the next attempt narrows down which point the device dislikes.
@@ -172,16 +187,17 @@ public static class ModbusReadPlan
         var half = block.Points.Count / 2;
         return new List<ModbusReadBlock>
         {
-            Tighten(block.Area, block.Points.Take(half).ToList()),
-            Tighten(block.Area, block.Points.Skip(half).ToList()),
+            Tighten(block, block.Points.Take(half).ToList()),
+            Tighten(block, block.Points.Skip(half).ToList()),
         };
     }
 
     /// <summary>A block covering exactly the given points, with no slack at either end.</summary>
-    private static ModbusReadBlock Tighten(ModbusRegisterType area, List<ModbusPoint> points)
+    private static ModbusReadBlock Tighten(ModbusReadBlock source, List<ModbusPoint> points)
     {
         var start = points.Min(p => p.Start);
         var end = points.Max(p => p.End);
-        return new ModbusReadBlock(area, (ushort)start, (ushort)(end - start), points);
+        return new ModbusReadBlock(source.Area, (ushort)start, (ushort)(end - start), points,
+            source.ScanInterval);
     }
 }

@@ -67,6 +67,15 @@ public sealed record TagDefinition
 
     public double Offset { get; init; } = 0.0;
 
+    /// <summary>Controls are denied unless this exact tag is explicitly opted in.</summary>
+    public bool AllowWrite { get; init; }
+
+    /// <summary>Optional lower engineering-unit limit applied before inverse scaling.</summary>
+    public double? WriteMin { get; init; }
+
+    /// <summary>Optional upper engineering-unit limit applied before inverse scaling.</summary>
+    public double? WriteMax { get; init; }
+
     /// <summary>
     /// The tag is a <b>cumulative counter</b> — an energy meter register, a run-hour counter — whose
     /// value can only ever rise. A read lower than the highest one accepted so far is refused and the
@@ -108,6 +117,38 @@ public sealed record TagDefinition
     /// </para>
     /// </summary>
     public TimeSpan? ScanInterval { get; init; }
+}
+
+/// <summary>One shared safety check for every control path.</summary>
+public static class TagWritePolicy
+{
+    public static void EnsureAllowed(TagDefinition tag, object value)
+    {
+        if (!tag.AllowWrite)
+            throw new UnauthorizedAccessException($"Tag '{tag.Id}' is read-only. Enable AllowWrite explicitly before commanding it.");
+
+        if (tag.WriteMin is null && tag.WriteMax is null)
+            return;
+
+        double number;
+        try
+        {
+            number = Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException)
+        {
+            throw new ArgumentException($"Tag '{tag.Id}' has numeric write limits but the supplied value is not numeric.", nameof(value));
+        }
+
+        if (!double.IsFinite(number))
+            throw new ArgumentOutOfRangeException(nameof(value), "NaN and infinity cannot be written.");
+        if (tag.WriteMin is { } min && number < min)
+            throw new ArgumentOutOfRangeException(nameof(value), number,
+                $"Value for '{tag.Id}' is below its write minimum {min}.");
+        if (tag.WriteMax is { } max && number > max)
+            throw new ArgumentOutOfRangeException(nameof(value), number,
+                $"Value for '{tag.Id}' is above its write maximum {max}.");
+    }
 }
 
 /// <summary>Defaults the internal tag kinds fall back to, in one place rather than at each caller.</summary>

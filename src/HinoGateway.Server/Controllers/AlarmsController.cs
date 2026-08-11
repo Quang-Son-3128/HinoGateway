@@ -1,5 +1,7 @@
 using HinoGateway.Core;
 using HinoGateway.Engine;
+using HinoGateway.Server.Security;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace HinoGateway.Server.Controllers;
@@ -13,6 +15,7 @@ namespace HinoGateway.Server.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/alarms")]
+[Authorize(Policy = GatewayPolicies.Viewer)]
 public sealed class AlarmsController : ControllerBase
 {
     private readonly IAlarmStore _store;
@@ -37,6 +40,7 @@ public sealed class AlarmsController : ControllerBase
     public Task<IReadOnlyList<AlarmDto>> GetAlarms(CancellationToken ct) => _store.GetAlarmsAsync(ct);
 
     [HttpPut("{id}")]
+    [Authorize(Policy = GatewayPolicies.Admin)]
     public async Task<IActionResult> Upsert(string id, [FromBody] AlarmDto dto, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(dto.Id) || dto.Id.Trim() != id)
@@ -72,6 +76,7 @@ public sealed class AlarmsController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Policy = GatewayPolicies.Admin)]
     public async Task<IActionResult> Delete(string id, CancellationToken ct)
     {
         var removed = await _store.DeleteAlarmAsync(id, ct);
@@ -83,6 +88,7 @@ public sealed class AlarmsController : ControllerBase
 
     /// <summary>Re-read the alarm configuration into the engine (also called after a tag rename).</summary>
     [HttpPost("reload")]
+    [Authorize(Policy = GatewayPolicies.Admin)]
     public async Task<IActionResult> Reload(CancellationToken ct)
     {
         await ReloadAsync(ct);
@@ -104,12 +110,14 @@ public sealed class AlarmsController : ControllerBase
 
     /// <summary>
     /// Acknowledge one alarm (<c>alarmId</c>) or everything outstanding (<c>all: true</c>).
-    /// The acknowledgement is journalled with the operator name supplied by the caller.
+    /// The acknowledgement is journalled with the authenticated identity; a body field cannot
+    /// impersonate another operator.
     /// </summary>
     [HttpPost("ack")]
+    [Authorize(Policy = GatewayPolicies.Operator)]
     public ActionResult<AckResult> Acknowledge([FromBody] AckRequest request)
     {
-        var user = string.IsNullOrWhiteSpace(request.User) ? null : request.User.Trim();
+        var user = User.Identity?.Name ?? "unknown";
 
         if (request.All)
             return new AckResult(_engine.AcknowledgeAll(user));
@@ -149,7 +157,7 @@ public sealed class AlarmsController : ControllerBase
         _engine.Reload(AlarmMapping.ToDefinitions(alarms, tags, _logger));
     }
 
-    public sealed record AckRequest(string? AlarmId, bool All, string? User);
+    public sealed record AckRequest(string? AlarmId, bool All);
 
     public sealed record AckResult(int Acknowledged);
 }

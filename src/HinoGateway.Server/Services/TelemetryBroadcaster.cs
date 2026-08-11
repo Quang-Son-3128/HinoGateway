@@ -13,38 +13,96 @@ namespace HinoGateway.Server.Services;
 /// </summary>
 public sealed class TelemetryBroadcaster : BackgroundService
 {
+    private static readonly TimeSpan CoalesceWindow = TimeSpan.FromMilliseconds(100);
     private readonly DeviceEngine _engine;
     private readonly IHubContext<TelemetryHub> _hub;
     private readonly ILogger<TelemetryBroadcaster> _logger;
+    private readonly ComponentHealthRegistry _health;
 
-    public TelemetryBroadcaster(DeviceEngine engine, IHubContext<TelemetryHub> hub, ILogger<TelemetryBroadcaster> logger)
+    public TelemetryBroadcaster(DeviceEngine engine, IHubContext<TelemetryHub> hub,
+        ComponentHealthRegistry health, ILogger<TelemetryBroadcaster> logger)
     {
         _engine = engine;
         _hub = hub;
         _logger = logger;
+        _health = health;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var subscription = _engine.Tags.Subscribe("signalr", dropOldest: true);
-        try
+        while (!stoppingToken.IsCancellationRequested)
         {
-            await foreach (var batch in subscription.Reader.ReadAllAsync(stoppingToken))
+            try
             {
-                var samples = batch
-                    .Select(r => new TagSample(r.TagId, r.Value.Value, r.Value.Quality, r.Value.SourceTimestamp, r.Value.LastChanged, r.Value.StatusText))
-                    .ToList();
+                _health.Running("signalr-telemetry");
+                using var subscription = _engine.Tags.Subscribe("signalr", dropOldest: true);
+                var deltas = new TelemetryDeltaBuffer();
+                var nextPrune = DateTimeOffset.UtcNow.AddMinutes(1);
+                while (await WaitForTelemetryAsync(subscription.Reader, stoppingToken))
+                {
+                    // Let device batches arriving in the same scan wave accumulate, then send one
+                    // latest-per-tag message instead of one SignalR invocation per device.
+                    await Task.Delay(CoalesceWindow, stoppingToken);
+                    while (subscription.Reader.TryRead(out var batch))
+                        deltas.Add(batch);
 
-                await _hub.Clients.All.SendAsync("TagsUpdated", samples, stoppingToken);
+                    var samples = deltas.Drain();
+                    if (DateTimeOffset.UtcNow >= nextPrune)
+                    {
+                        deltas.RetainOnly(_engine.Tags.Snapshot().Keys.ToHashSet(StringComparer.Ordinal));
+                        nextPrune = DateTimeOffset.UtcNow.AddMinutes(1);
+                    }
+
+                    // Completing an iteration is what proves this loop is alive — NOT having something
+                    // to send. The tag store publishes every poll batch whether or not a value moved,
+                    // so on a plant sitting still this loop spins here with nothing to broadcast and
+                    // never reaches the idle wait below. Heartbeating only on a successful send made a
+                    // perfectly healthy gateway go stale after 30 s and answer /health/ready with 503,
+                    // which is how a watchdog ends up restarting a plant that is running fine.
+                    _health.Heartbeat("signalr-telemetry");
+                    if (samples.Count == 0)
+                        continue;
+
+                    try
+                    {
+                        await _hub.Clients.All.SendAsync("TagsUpdated", samples, stoppingToken);
+                        deltas.MarkSent(samples);
+                    }
+                    catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+                    {
+                        // Keep the sent state unchanged: the next device sample is considered unsent and
+                        // retried. One transient hub failure must not permanently stop live telemetry.
+                        _logger.LogWarning(ex, "Could not broadcast {Count} telemetry delta(s); retrying on the next sample",
+                            samples.Count);
+                    }
+                }
+                if (!stoppingToken.IsCancellationRequested)
+                    throw new InvalidOperationException("SignalR telemetry subscription closed unexpectedly.");
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+            catch (Exception ex)
+            {
+                _health.Failed("signalr-telemetry", ex);
+                _logger.LogError(ex, "TelemetryBroadcaster stopped unexpectedly; restarting");
+                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
             }
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            // normal shutdown
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "TelemetryBroadcaster stopped unexpectedly");
-        }
     }
+
+    private async Task<bool> WaitForTelemetryAsync(
+        System.Threading.Channels.ChannelReader<IReadOnlyList<TagRead>> reader, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            using var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            heartbeat.CancelAfter(TimeSpan.FromSeconds(5));
+            try { return await reader.WaitToReadAsync(heartbeat.Token); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                _health.Heartbeat("signalr-telemetry");
+            }
+        }
+        return false;
+    }
+
 }

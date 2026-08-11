@@ -110,6 +110,13 @@ public sealed class ProjectValidator
             // rejected: the connection is the clock, so such a tag is simply read every scan.
             if (tag.ScanIntervalMs is < 0 or > 86_400_000)
                 problems.Add($"Tag '{tag.Id}' has a scan rate outside 0..86400000 ms (0 = follow the connection).");
+            if (tag.WriteMin is { } min && !double.IsFinite(min)
+                || tag.WriteMax is { } max && !double.IsFinite(max))
+                problems.Add($"Tag '{tag.Name}' has a non-finite write limit.");
+            if (tag.WriteMin is { } lower && tag.WriteMax is { } upper && lower > upper)
+                problems.Add($"Tag '{tag.Name}' write minimum must not exceed its maximum.");
+            if (tag.Kind == TagKind.Expression && tag.AllowWrite)
+                problems.Add($"Expression tag '{tag.Name}' cannot be writable.");
             if (tag.GroupId is not null && !groupById.ContainsKey(tag.GroupId))
                 problems.Add($"Tag '{tag.Name}' references missing folder '{tag.GroupId}'.");
 
@@ -129,7 +136,8 @@ public sealed class ProjectValidator
                     Id = TagPaths.TagPath(paths, tag.GroupId, tag.Name.Trim()),
                     Name = tag.Name.Trim(), Address = tag.Address ?? "", DataType = tag.DataType,
                     Unit = tag.Unit, Description = tag.Description, Scale = tag.Scale,
-                    Offset = tag.Offset, Monotonic = tag.Monotonic,
+                    Offset = tag.Offset, Monotonic = tag.Monotonic, AllowWrite = tag.AllowWrite,
+                    WriteMin = tag.WriteMin, WriteMax = tag.WriteMax,
                     ScanInterval = TagScanRate.FromMilliseconds(tag.ScanIntervalMs),
                 };
                 var deviceId = tag.DeviceId ?? "";
@@ -214,6 +222,10 @@ public sealed class ProjectValidator
         var path = TagPaths.TagPath(paths, tag.GroupId, tag.Name?.Trim() ?? "");
 
         if (!Enum.IsDefined(tag.DataType)) problems.Add("Unknown data type.");
+        if (tag.WriteMin is { } lower && tag.WriteMax is { } upper && lower > upper)
+            problems.Add("Write minimum must not exceed write maximum.");
+        if (tag.WriteMin is { } min && !double.IsFinite(min) || tag.WriteMax is { } max && !double.IsFinite(max))
+            problems.Add("Write limits must be finite.");
         if (tag.ScanIntervalMs is < 0 or > 86_400_000)
             problems.Add("The evaluation period must be between 0 and 86400000 ms (0 = default).");
 
@@ -224,6 +236,9 @@ public sealed class ProjectValidator
                 problems.Add($"Initial value: {initialError?.TrimEnd('.')}.");
             return problems;
         }
+
+        if (tag.AllowWrite)
+            problems.Add("An expression tag cannot be writable.");
 
         if (string.IsNullOrWhiteSpace(tag.Expression))
         {
@@ -274,7 +289,7 @@ public sealed class ProjectValidator
     public static List<string> ValidateMqtt(MqttPublisherOptions o)
     {
         var errors = new List<string>();
-        if (string.IsNullOrWhiteSpace(o.Broker)) errors.Add("Broker is required.");
+        if (o.Enabled && string.IsNullOrWhiteSpace(o.Broker)) errors.Add("Broker is required when MQTT is enabled.");
         if (o.Port is < 1 or > 65535) errors.Add("Port must be between 1 and 65535.");
         if (string.IsNullOrWhiteSpace(o.ClientId)) errors.Add("Client ID is required.");
         if (string.IsNullOrWhiteSpace(o.PublishTopic) || o.PublishTopic.Contains('#') || o.PublishTopic.Contains('+'))
@@ -313,6 +328,15 @@ public sealed class ProjectValidator
         if (options.MaxConnections is < 1 or > 32) problems.Add($"Max connections must be between 1 and 32 (got {options.MaxConnections}).");
         if (options.CommandQueueCapacity is < 1 or > 10_000) problems.Add("Command queue capacity must be between 1 and 10000.");
         if (options.CommandTimeoutMs is < 100 or > 600_000) problems.Add("Command timeout must be between 100 and 600000 milliseconds.");
+        if (options.OutboundQueueCapacity is < 64 or > 100_000) problems.Add("Outbound queue capacity must be between 64 and 100000.");
+        if (options.MaxSpontaneousPerSecond is < 1 or > 100_000) problems.Add("Maximum spontaneous rate must be between 1 and 100000 per second.");
+        foreach (var rule in options.AllowedClients)
+        {
+            var parts = rule.Split('/', 2);
+            if (!System.Net.IPAddress.TryParse(parts[0], out var parsed)
+                || parts.Length == 2 && (!int.TryParse(parts[1], out var bits) || bits < 0 || bits > parsed.GetAddressBytes().Length * 8))
+                problems.Add($"IEC-104 allowed client '{rule}' is not a valid IP address or CIDR.");
+        }
         if (options.K is < 1 or > 32767) problems.Add("k must be between 1 and 32767.");
         if (options.W is < 1 or > 32767) problems.Add("w must be between 1 and 32767.");
         if (options.W > options.K) problems.Add($"w ({options.W}) must not exceed k ({options.K}).");
@@ -340,6 +364,13 @@ public sealed class ProjectValidator
             }
             if (!Enum.IsDefined(point.Type)) problems.Add($"IOA {point.Ioa}: unknown point type.");
             if (!Enum.IsDefined(point.Command)) problems.Add($"IOA {point.Ioa}: unknown command type.");
+            if (point.RequireSelect && point.Command == Iec104CommandType.None)
+                problems.Add($"IOA {point.Ioa}: select-before-operate requires a command type.");
+            if (point.Command is Iec104CommandType.SingleCommand or Iec104CommandType.DoubleCommand
+                && !point.RequireSelect)
+                problems.Add($"IOA {point.Ioa}: Single/Double controls must use select-before-operate.");
+            if (point.Command != Iec104CommandType.None && !tag.AllowWrite)
+                problems.Add($"IOA {point.Ioa} ('{tag.Path}') is commandable but the tag's AllowWrite safety switch is off.");
             if (!double.IsFinite(point.Deadband) || point.Deadband < 0) problems.Add($"IOA {point.Ioa}: the deadband cannot be negative or non-finite.");
             if (!double.IsFinite(point.ReportScale) || point.ReportScale == 0) problems.Add($"IOA {point.Ioa}: report scale must be finite and non-zero.");
 

@@ -253,6 +253,84 @@ public class JsonProjectStoreTests : IDisposable
     }
 
     [Fact]
+    public void Version_6_status_controls_migrate_to_select_before_operate()
+    {
+        var project = new HinoProject
+        {
+            Version = 6,
+            Iec104 = new Iec104ServerOptions
+            {
+                Points =
+                [
+                    new Iec104PointDto { Ioa = 1, Command = Iec104CommandType.SingleCommand },
+                    new Iec104PointDto { Ioa = 2, Command = Iec104CommandType.SetpointShort },
+                ],
+            },
+        };
+
+        JsonProjectStore.Normalise(project);
+
+        Assert.Equal(HinoProject.CurrentVersion, project.Version);
+        Assert.True(project.Iec104.Points[0].RequireSelect);
+        Assert.False(project.Iec104.Points[1].RequireSelect);
+    }
+
+    /// <summary>
+    /// Version 7 split "commandable" into RequireSelect on the point and AllowWrite on the tag. In a
+    /// version 6 file the mapping itself was the authorisation, so both halves have to be carried
+    /// across — otherwise the project validator refuses the file and a routine restore from a .hino
+    /// backup becomes a dead end.
+    /// </summary>
+    [Fact]
+    public void Version_6_commandable_points_keep_their_tags_writable()
+    {
+        var project = new HinoProject
+        {
+            Version = 6,
+            Tags =
+            [
+                new TagDto { Id = "t-breaker", Name = "Breaker" },
+                new TagDto { Id = "t-setpoint", Name = "Setpoint" },
+                new TagDto { Id = "t-readonly", Name = "Reading" },
+            ],
+            Iec104 = new Iec104ServerOptions
+            {
+                Points =
+                [
+                    new Iec104PointDto { Ioa = 1, TagId = "t-breaker", Command = Iec104CommandType.DoubleCommand },
+                    new Iec104PointDto { Ioa = 2, TagId = "t-setpoint", Command = Iec104CommandType.SetpointShort },
+                    new Iec104PointDto { Ioa = 3, TagId = "t-readonly", Command = Iec104CommandType.None },
+                ],
+            },
+        };
+
+        JsonProjectStore.Normalise(project);
+
+        Assert.True(project.Tags.Single(t => t.Id == "t-breaker").AllowWrite);
+        Assert.True(project.Tags.Single(t => t.Id == "t-setpoint").AllowWrite);
+        Assert.False(project.Tags.Single(t => t.Id == "t-readonly").AllowWrite);
+    }
+
+    /// <summary>A project already at the current version must not have its safety switches touched.</summary>
+    [Fact]
+    public void Current_version_projects_keep_their_write_switches_as_configured()
+    {
+        var project = new HinoProject
+        {
+            Version = HinoProject.CurrentVersion,
+            Tags = [new TagDto { Id = "t-breaker", Name = "Breaker", AllowWrite = false }],
+            Iec104 = new Iec104ServerOptions
+            {
+                Points = [new Iec104PointDto { Ioa = 1, TagId = "t-breaker", Command = Iec104CommandType.DoubleCommand }],
+            },
+        };
+
+        JsonProjectStore.Normalise(project);
+
+        Assert.False(project.Tags.Single().AllowWrite);
+    }
+
+    [Fact]
     public async Task Callers_cannot_mutate_the_stored_configuration_behind_the_stores_back()
     {
         var store = NewStore();

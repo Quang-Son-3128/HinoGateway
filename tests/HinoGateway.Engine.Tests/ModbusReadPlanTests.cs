@@ -9,11 +9,16 @@ namespace HinoGateway.Engine.Tests;
 /// </summary>
 public class ModbusReadPlanTests
 {
-    private static ModbusPoint Point(string address, DataType type = DataType.Int16, string name = "T")
+    private static ModbusPoint Point(string address, DataType type = DataType.Int16, string name = "T",
+        TimeSpan? scanInterval = null)
     {
         var addr = ModbusAddress.Parse(address);
         return new ModbusPoint(
-            new TagDefinition { Id = $"A/{name}", Name = name, Address = address, DataType = type },
+            new TagDefinition
+            {
+                Id = $"A/{name}", Name = name, Address = address, DataType = type,
+                ScanInterval = scanInterval,
+            },
             addr,
             ModbusAddress.RegisterCount(type));
     }
@@ -100,6 +105,32 @@ public class ModbusReadPlanTests
     }
 
     [Fact]
+    public void Points_with_different_scan_rates_get_different_requests()
+    {
+        var slow = TimeSpan.FromSeconds(10);
+        var blocks = Plan(
+            Point("HR:0", name: "Fast"),
+            Point("HR:1", name: "Slow", scanInterval: slow));
+
+        Assert.Equal(2, blocks.Count);
+        Assert.Contains(blocks, b => b.ScanInterval is null && b.Points.Single().Tag.Name == "Fast");
+        Assert.Contains(blocks, b => b.ScanInterval == slow && b.Points.Single().Tag.Name == "Slow");
+    }
+
+    [Fact]
+    public void A_slow_block_is_not_due_again_until_its_interval_expires()
+    {
+        var block = Assert.Single(Plan(Point("HR:0", scanInterval: TimeSpan.FromSeconds(10))));
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(block.IsDue(now));
+        block.MarkPolled(now);
+        Assert.False(block.IsDue(now.AddSeconds(9)));
+        Assert.True(block.IsDue(now.AddSeconds(10)));
+        Assert.Equal(10_000, block.ToStat(now).ScanIntervalMs);
+    }
+
+    [Fact]
     public void Overlapping_points_do_not_widen_the_block_twice()
     {
         // A Float32 at 0 covers 0..1, and an Int16 at 1 sits inside it.
@@ -125,6 +156,7 @@ public class ModbusReadPlanTests
         Assert.Equal(2, halves[0].Count);
         Assert.Equal(2, halves[1].Start);
         Assert.Equal(2, halves[1].Count);
+        Assert.All(halves, half => Assert.Equal(block.ScanInterval, half.ScanInterval));
     }
 
     [Fact]

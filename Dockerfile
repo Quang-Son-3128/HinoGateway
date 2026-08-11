@@ -7,10 +7,10 @@ COPY global.json ./
 COPY HinoGateway.sln ./
 COPY src/ src/
 COPY tests/ tests/
-RUN dotnet restore src/HinoGateway.Server/HinoGateway.Server.csproj
+RUN dotnet restore src/HinoGateway.Server/HinoGateway.Server.csproj -m:1 -nr:false -p:RestoreDisableParallel=true
 
 # Publish the server (this also produces & bundles the WASM client assets)
-RUN dotnet publish src/HinoGateway.Server/HinoGateway.Server.csproj -c Release -o /app --no-restore
+RUN dotnet publish src/HinoGateway.Server/HinoGateway.Server.csproj -c Release -o /app --no-restore -m:1 -nr:false -p:UseSharedCompilation=false
 
 # --- Runtime stage: ASP.NET Core only, no SDK, runs on Linux ---
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime

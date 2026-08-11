@@ -57,7 +57,7 @@ public sealed class MqttPublisherOptions
 
     /// <summary>
     /// Ceiling on the on-disk spool (1 MB … 10 GB). The spool itself lives in
-    /// <c>data/mqtt-spool</c> beside the executable — a path the publisher owns, not a setting.
+    /// <c>mqtt/spool</c> below the stable gateway data root — a path the publisher owns, not a setting.
     /// </summary>
     public long MaxSpoolBytes { get; set; } = 268435456;
 
@@ -98,4 +98,7 @@ public sealed record MqttPublisherStatus(
     long DroppedSpoolBatches,
     DateTimeOffset? LastConnectedAt,
     DateTimeOffset? LastPublishedAt,
-    string? LastError);
+    string? LastError)
+{
+    public long LoopRestarts { get; init; }
+}

@@ -5,100 +5,87 @@ namespace HinoGateway.Drivers.Modbus;
 public sealed class ModbusTcpDriverFactory : IDeviceDriverFactory
 {
     public string DriverType => "ModbusTCP";
-
     public IDeviceDriver Create(DeviceConfig config) => new ModbusTcpDriver(config);
 
-    /// <summary>
-    /// Everything the driver's constructor would otherwise throw on, reported up front and per tag
-    /// so one mistyped address cannot take the connection — or the gateway's startup — down with it.
-    /// </summary>
     public IReadOnlyList<string> Validate(DeviceConfig config)
     {
         var problems = new List<string>();
-
-        var host = Setting(config, "Host");
-        if (string.IsNullOrWhiteSpace(host))
+        if (string.IsNullOrWhiteSpace(Setting(config, "Host")))
             problems.Add("Setting 'Host' is required (the device's IP address or hostname).");
+        Number("Port", 1, 65535);
+        Number("UnitId", 1, 255);
+        Number("TimeoutMs", 50, 600_000);
+        Number("Retries", 0, 10);
+        Number("MaxRegisterGap", 0, ModbusReadPlan.MaxRegistersPerRead);
+        Number("MaxBitGap", 0, ModbusReadPlan.MaxBitsPerRead);
+        Number("PollDeadlineMs", 100, 600_000);
+        Number("QuarantineMs", 1_000, 86_400_000);
+        foreach (var key in new[] { "WordSwap", "ByteSwap" })
+            if (Setting(config, key) is { Length: > 0 } text && !bool.TryParse(text, out _))
+                problems.Add($"Setting '{key}' must be true or false (got '{text}').");
+        return problems;
 
-        if (Setting(config, "Port") is { Length: > 0 } port
-            && (!int.TryParse(port, out var portNumber) || portNumber is < 1 or > 65535))
-            problems.Add($"Setting 'Port' must be a number between 1 and 65535 (got '{port}').");
-
-        if (Setting(config, "UnitId") is { Length: > 0 } unit
-            && (!byte.TryParse(unit, out var unitId) || unitId == 0))
-            problems.Add($"Setting 'UnitId' must be a number between 1 and 255 (got '{unit}').");
-
-        if (Setting(config, "TimeoutMs") is { Length: > 0 } timeout
-            && (!int.TryParse(timeout, out var timeoutMs) || timeoutMs < 50))
-            problems.Add($"Setting 'TimeoutMs' must be a number of at least 50 (got '{timeout}').");
-
-        if (Setting(config, "Retries") is { Length: > 0 } retries
-            && (!int.TryParse(retries, out var retryCount) || retryCount is < 0 or > 10))
-            problems.Add($"Setting 'Retries' must be a number between 0 and 10 (got '{retries}').");
-
-        foreach (var flag in new[] { "WordSwap", "ByteSwap" })
+        void Number(string key, int min, int max)
         {
-            if (Setting(config, flag) is { Length: > 0 } value && !bool.TryParse(value, out _))
-                problems.Add($"Setting '{flag}' must be true or false (got '{value}').");
+            var text = Setting(config, key);
+            if (text.Length > 0 && (!int.TryParse(text, out var value) || value < min || value > max))
+                problems.Add($"Setting '{key}' must be a number between {min} and {max} (got '{text}').");
         }
+    }
 
-        foreach (var (key, min, max) in new[]
-                 {
-                     ("MaxRegisterGap", 0, ModbusReadPlan.MaxRegistersPerRead),
-                     ("MaxBitGap", 0, ModbusReadPlan.MaxBitsPerRead),
-                     ("PollDeadlineMs", 100, 600_000),
-                     ("QuarantineMs", 1_000, 86_400_000),
-                 })
-        {
-            if (Setting(config, key) is { Length: > 0 } value
-                && (!int.TryParse(value, out var number) || number < min || number > max))
-                problems.Add($"Setting '{key}' must be a number between {min} and {max} (got '{value}').");
-        }
-
+    public IReadOnlyDictionary<string, string> ValidateTags(DeviceConfig config)
+    {
+        var problems = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var tag in config.Tags)
         {
             if (tag.DataType == DataType.String)
             {
-                problems.Add($"Tag '{tag.Name}': the Modbus driver cannot read String tags yet — use a numeric type.");
+                problems[tag.Id] = $"Tag '{tag.Name}': the Modbus driver does not support String tags yet.";
                 continue;
             }
-
-            ModbusAddress address;
             try
             {
-                address = ModbusAddress.Parse(tag.Address);
+                var address = ModbusAddress.Parse(tag.Address);
+                var registers = ModbusAddress.RegisterCount(tag.DataType);
+                if (address.Type is ModbusRegisterType.HoldingRegister or ModbusRegisterType.InputRegister
+                    && address.Address + registers > ushort.MaxValue + 1)
+                    problems[tag.Id] = $"Tag '{tag.Name}': a {tag.DataType} needs {registers} registers and exceeds the address space.";
+                else if (address.Type is ModbusRegisterType.Coil or ModbusRegisterType.DiscreteInput
+                         && tag.DataType != DataType.Bool)
+                    problems[tag.Id] = $"Tag '{tag.Name}': a bit area must use Bool, not {tag.DataType}.";
+                else if (address.Bit is not null && tag.DataType != DataType.Bool)
+                    problems[tag.Id] = $"Tag '{tag.Name}': a register bit address must use Bool, not {tag.DataType}.";
             }
-            catch (FormatException ex)
-            {
-                problems.Add($"Tag '{tag.Name}' (address '{tag.Address}'): {ex.Message}");
-                continue;
-            }
-
-            // A multi-register type must not run off the end of the address space.
-            var registers = ModbusAddress.RegisterCount(tag.DataType);
-            if (address.Type is ModbusRegisterType.HoldingRegister or ModbusRegisterType.InputRegister
-                && address.Address + registers > ushort.MaxValue + 1)
-            {
-                problems.Add($"Tag '{tag.Name}': a {tag.DataType} needs {registers} registers, " +
-                             $"which runs past the end of the address space at {address.Address}.");
-            }
-
-            if (address.Type is ModbusRegisterType.Coil or ModbusRegisterType.DiscreteInput
-                && tag.DataType != DataType.Bool)
-            {
-                problems.Add($"Tag '{tag.Name}': address '{tag.Address}' is a single bit, so its type must be Bool " +
-                             $"(got {tag.DataType}).");
-            }
-
-            if (address.Bit is not null && tag.DataType != DataType.Bool)
-            {
-                problems.Add($"Tag '{tag.Name}': address '{tag.Address}' selects one bit of a register, " +
-                             $"so its type must be Bool (got {tag.DataType}).");
-            }
+            catch (FormatException ex) { problems[tag.Id] = $"Tag '{tag.Name}', address '{tag.Address}': {ex.Message}"; }
         }
-
         return problems;
     }
+
+    public DriverDescriptor Describe() => new()
+    {
+        DriverType = DriverType,
+        DisplayName = "Modbus TCP",
+        Description = "Modbus TCP master with grouped reads, block diagnostics and safe writes.",
+        Capabilities = DriverCapabilities.Writable | DriverCapabilities.BulkRead | DriverCapabilities.Diagnostics,
+        EndpointFormat = "{Host}:{Port} unit {UnitId}",
+        AddressSyntaxHelp = "HR/IR/COIL/DI addresses, e.g. HR:0, IR:20, COIL:10 or 40001. A register bit may end in .0-.15.",
+        AddressExamples = ["HR:0", "IR:20", "COIL:10", "40001", "HR:12.3"],
+        SupportedTypes = Enum.GetValues<DataType>().Where(t => t != DataType.String).ToArray(),
+        Settings =
+        [
+            new DriverSetting { Key = "Host", Label = "Host", Required = true, Default = "127.0.0.1" },
+            new DriverSetting { Key = "Port", Label = "Port", Kind = DriverSettingKind.Number, Default = "502", Min = 1, Max = 65535 },
+            new DriverSetting { Key = "UnitId", Label = "Unit ID", Kind = DriverSettingKind.Number, Default = "1", Min = 1, Max = 255 },
+            new DriverSetting { Key = "TimeoutMs", Label = "Timeout (ms)", Kind = DriverSettingKind.Number, Default = "1000", Min = 50, Max = 600000 },
+            new DriverSetting { Key = "Retries", Label = "Retries", Kind = DriverSettingKind.Number, Default = "1", Min = 0, Max = 10 },
+            new DriverSetting { Key = "WordSwap", Label = "Swap words", Kind = DriverSettingKind.Bool, Default = "false" },
+            new DriverSetting { Key = "ByteSwap", Label = "Swap bytes", Kind = DriverSettingKind.Bool, Default = "false" },
+            new DriverSetting { Key = "MaxRegisterGap", Label = "Max register gap", Kind = DriverSettingKind.Number, Default = "8", Min = 0, Max = 125, Advanced = true },
+            new DriverSetting { Key = "MaxBitGap", Label = "Max bit gap", Kind = DriverSettingKind.Number, Default = "64", Min = 0, Max = 2000, Advanced = true },
+            new DriverSetting { Key = "PollDeadlineMs", Label = "Poll deadline (ms)", Kind = DriverSettingKind.Number, Default = "5000", Min = 100, Max = 600000, Advanced = true },
+            new DriverSetting { Key = "QuarantineMs", Label = "Quarantine (ms)", Kind = DriverSettingKind.Number, Default = "60000", Min = 1000, Max = 86400000, Advanced = true },
+        ],
+    };
 
     private static string Setting(DeviceConfig config, string key) =>
         config.Settings.TryGetValue(key, out var value) ? value?.Trim() ?? "" : "";

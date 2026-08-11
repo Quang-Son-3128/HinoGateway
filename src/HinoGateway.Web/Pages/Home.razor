@@ -4,6 +4,7 @@
 @using Microsoft.AspNetCore.SignalR.Client
 @implements IAsyncDisposable
 @inject NavigationManager Nav
+@inject HinoGateway.Web.Security.ApiKeyStore ApiKeys
 @inject HttpClient Http
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
@@ -22,6 +23,13 @@
     <MudSpacer />
     <MudText Typo="Typo.caption" Class="mono" Style="opacity:.55">@_updateCount updates received</MudText>
 </div>
+
+@foreach (var alarm in _components.Where(x => x.AlarmActive))
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense Class="mb-2">
+        <strong>@alarm.Name</strong>: @alarm.AlarmReason
+    </MudAlert>
+}
 
 <div class="kpi-row mb-4">
     <div class="kpi kpi-accent">
@@ -177,6 +185,7 @@ else
     private readonly Dictionary<string, TagSample> _values = new();
     private List<TagInfo> _view = new();
     private List<DeviceHealth> _health = new();
+    private List<ComponentHealthDto> _components = new();
     private HubConnection? _hub;
     private System.Threading.Timer? _healthTimer;
     private System.Threading.Timer? _renderTimer;
@@ -240,7 +249,8 @@ else
         }, null, 300, 300);
 
         _hub = new HubConnectionBuilder()
-            .WithUrl(Nav.ToAbsoluteUri("/hubs/telemetry"))
+            .WithUrl(Nav.ToAbsoluteUri("/hubs/telemetry"), options =>
+                options.AccessTokenProvider = ApiKeys.GetAsync)
             .WithAutomaticReconnect()
             .Build();
 
@@ -261,6 +271,7 @@ else
         try
         {
             _health = await Http.GetFromJsonAsync<List<DeviceHealth>>("api/health") ?? new();
+            _components = await Http.GetFromJsonAsync<List<ComponentHealthDto>>("api/health/components") ?? new();
             StateHasChanged();
         }
         catch { /* server briefly unreachable — keep last known */ }
@@ -343,4 +354,9 @@ else
         if (_hub is not null)
             await _hub.DisposeAsync();
     }
+
+    private sealed record ComponentHealthDto(
+        string Name, bool Running, long Restarts, int RecentRestarts,
+        DateTimeOffset LastHeartbeat, DateTimeOffset? LastFailure, string? LastError,
+        bool Stale, bool RestartStorm, bool AlarmActive, string? AlarmReason);
 }

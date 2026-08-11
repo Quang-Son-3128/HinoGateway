@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text;
 using HinoGateway.Core;
 using HinoGateway.Server.Services;
+using HinoGateway.Server.Security;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace HinoGateway.Server.Controllers;
@@ -13,6 +15,7 @@ namespace HinoGateway.Server.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/iec104")]
+[Authorize(Policy = GatewayPolicies.Viewer)]
 public sealed class Iec104Controller : ControllerBase
 {
     /// <summary>IEC 60870-5-101/104 information object addresses are three octets.</summary>
@@ -34,6 +37,7 @@ public sealed class Iec104Controller : ControllerBase
     public Iec104Status GetStatus() => _link.CurrentStatus();
 
     [HttpPut]
+    [Authorize(Policy = GatewayPolicies.Admin)]
     public async Task<IActionResult> Save([FromBody] Iec104ServerOptions options, CancellationToken ct)
     {
         var problems = await ValidateAsync(options, ct);
@@ -46,11 +50,12 @@ public sealed class Iec104Controller : ControllerBase
 
     /// <summary>Restart the station from the saved configuration.</summary>
     [HttpPost("apply")]
+    [Authorize(Policy = GatewayPolicies.Admin)]
     public async Task<ActionResult<Iec104Status>> Apply(CancellationToken ct) => await _link.ApplyAsync(ct);
 
     // --- signal list as CSV --------------------------------------------------
 
-    private const string CsvHeader = "TagPath,Ioa,Type,Deadband,WithTimestamp,Command,ReportScale";
+    private const string CsvHeader = "TagPath,Ioa,Type,Deadband,WithTimestamp,Command,ReportScale,RequireSelect";
 
     [HttpGet("points/csv")]
     public async Task<IActionResult> ExportCsv(CancellationToken ct)
@@ -69,7 +74,8 @@ public sealed class Iec104Controller : ControllerBase
                 point.Deadband.ToString(CultureInfo.InvariantCulture),
                 point.WithTimestamp,
                 point.Command == Iec104CommandType.None ? "None" : $"T{Iec104TypeIds.Number(point.Command)}",
-                point.ReportScale.ToString(CultureInfo.InvariantCulture)));
+                point.ReportScale.ToString(CultureInfo.InvariantCulture),
+                point.RequireSelect));
         }
 
         return File(Encoding.UTF8.GetBytes(csv.ToString()), "text/csv",
@@ -82,6 +88,7 @@ public sealed class Iec104Controller : ControllerBase
     /// nothing is saved unless the whole file is usable.
     /// </summary>
     [HttpPost("points/csv")]
+    [Authorize(Policy = GatewayPolicies.Admin)]
     public async Task<ActionResult<CsvImportResult>> ImportCsv([FromBody] CsvImportRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Csv))
@@ -151,11 +158,16 @@ public sealed class Iec104Controller : ControllerBase
                     continue;
                 }
                 point.Command = command;
+                if (command is Iec104CommandType.SingleCommand or Iec104CommandType.DoubleCommand)
+                    point.RequireSelect = true;
             }
 
             if (fields.Count > 6 && fields[6].Length > 0
                 && double.TryParse(fields[6], NumberStyles.Float, CultureInfo.InvariantCulture, out var scale))
                 point.ReportScale = scale;
+
+            if (fields.Count > 7 && fields[7].Length > 0 && bool.TryParse(fields[7], out var requireSelect))
+                point.RequireSelect = requireSelect;
 
             points.Add(point);
         }
@@ -222,6 +234,10 @@ public sealed class Iec104Controller : ControllerBase
             problems.Add($"Common address must be between 1 and 65534 (got {options.CommonAddress}).");
         if (options.MaxConnections is < 1 or > 32)
             problems.Add($"Max connections must be between 1 and 32 (got {options.MaxConnections}).");
+        if (options.CommandQueueCapacity is < 1 or > 10_000)
+            problems.Add("Command queue capacity must be between 1 and 10000.");
+        if (options.CommandTimeoutMs is < 100 or > 600_000)
+            problems.Add("Command timeout must be between 100 and 600000 ms.");
         if (options.K is < 1 or > 32767)
             problems.Add("k must be between 1 and 32767.");
         if (options.W is < 1 or > 32767)

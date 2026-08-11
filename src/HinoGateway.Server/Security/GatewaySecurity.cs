@@ -116,6 +116,14 @@ public sealed class GatewayApiKeyHandler : AuthenticationHandler<AuthenticationS
         }
 
         var supplied = Request.Headers[HeaderName].ToString();
+        if (string.IsNullOrEmpty(supplied) && Request.Path.StartsWithSegments("/hubs"))
+        {
+            var bearer = Request.Headers.Authorization.ToString();
+            if (bearer.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                supplied = bearer[7..];
+            else
+                supplied = Request.Query["access_token"].ToString();
+        }
         if (string.IsNullOrEmpty(supplied))
             return Task.FromResult(AuthenticateResult.NoResult());
 

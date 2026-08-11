@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Threading.Channels;
 using HinoGateway.Core;
 using HinoGateway.Engine;
 using lib60870;
@@ -11,6 +13,11 @@ namespace HinoGateway.Northbound.Iec104;
 
 /// <summary>Writes a value to a tag on behalf of a command from the control centre.</summary>
 public delegate Task Iec104TagWriter(string tagPath, object value, CancellationToken ct);
+public delegate Task Iec104CommandWriter(string tagPath, object value, string? remoteAddress, CancellationToken ct);
+public sealed record Iec104ControlAudit(DateTimeOffset Timestamp, string RemoteAddress, string Action,
+    int Ioa, string? TagPath, object? Value, string Outcome, string? Reason);
+public delegate Task Iec104AuditWriter(Iec104ControlAudit entry);
+public delegate void Iec104LoopHealth(string loop, Exception? failure);
 
 /// <summary>
 /// The gateway as an IEC 60870-5-104 <b>controlled station</b>: it listens on 2404 and the utility's
@@ -36,13 +43,15 @@ public sealed class Iec104Server : IAsyncDisposable
 
     private readonly Iec104ServerOptions _options;
     private readonly TagStore _tags;
-    private readonly Iec104TagWriter _writer;
+    private readonly Iec104CommandWriter _writer;
     private readonly ILogger<Iec104Server> _logger;
+    private readonly Iec104AuditWriter? _audit;
+    private readonly Iec104LoopHealth? _loopHealth;
 
     private readonly Dictionary<int, Iec104PointDto> _byIoa;
     private readonly Dictionary<string, List<Iec104PointDto>> _byTagPath;
     private readonly ConcurrentDictionary<int, TagValue> _lastReported = new();
-    private readonly ConcurrentDictionary<int, DateTimeOffset> _selected = new();
+    private readonly ConcurrentDictionary<int, Selection> _selected = new();
 
     // Connections are tracked per source address, not per socket: lib60870.NET 2.3.0 raises only the
     // CLOSED connection event (never OPENED or ACTIVE — verified against the library), so the only
@@ -56,9 +65,15 @@ public sealed class Iec104Server : IAsyncDisposable
     private CancellationTokenSource? _cts;
     private Task? _pump;
     private Task? _periodic;
+    private Channel<CommandWorkItem>? _commandQueue;
+    private Task? _commandPump;
+    private int _pendingCommands;
+    private int _stopping;
 
     private long _asdusSent, _asdusReceived, _commandsAccepted, _commandsRejected;
-    private long _spontaneousSent, _interrogationsServed;
+    private long _spontaneousSent, _interrogationsServed, _commandTimeouts;
+    private long _coalescedUpdates, _capacityDrops, _loopRestarts;
+    private int _pendingOutbound;
     private DateTimeOffset? _lastSentAt, _lastReceivedAt;
     private double? _lastClockOffsetSeconds;
     private string? _lastError;
@@ -66,11 +81,19 @@ public sealed class Iec104Server : IAsyncDisposable
 
     public Iec104Server(Iec104ServerOptions options, TagStore tags, Iec104TagWriter writer,
         ILogger<Iec104Server> logger)
+        : this(options, tags, (tag, value, _, ct) => writer(tag, value, ct), logger, null, null)
+    {
+    }
+
+    public Iec104Server(Iec104ServerOptions options, TagStore tags, Iec104CommandWriter writer,
+        ILogger<Iec104Server> logger, Iec104AuditWriter? audit = null, Iec104LoopHealth? loopHealth = null)
     {
         _options = options;
         _tags = tags;
         _writer = writer;
         _logger = logger;
+        _audit = audit;
+        _loopHealth = loopHealth;
 
         // Last mapping wins on a duplicated IOA; the configuration API rejects duplicates before we
         // ever get here, so this is only a safety net.
@@ -106,12 +129,31 @@ public sealed class Iec104Server : IAsyncDisposable
         DroppedUpdates: _subscription?.Dropped ?? 0,
         LastClockOffsetSeconds: _lastClockOffsetSeconds,
         LastError: _lastError,
-        Warning: _warning);
+        Warning: _warning)
+    {
+        PendingCommands = Volatile.Read(ref _pendingCommands),
+        CommandCapacity = Math.Clamp(_options.CommandQueueCapacity, 1, 10_000),
+        CommandTimeouts = Interlocked.Read(ref _commandTimeouts),
+        PendingOutbound = Volatile.Read(ref _pendingOutbound),
+        CoalescedUpdates = Interlocked.Read(ref _coalescedUpdates),
+        CapacityDrops = Interlocked.Read(ref _capacityDrops),
+        LoopRestarts = Interlocked.Read(ref _loopRestarts),
+    };
 
     public void Start()
     {
         if (_server is not null)
             return;
+
+        Interlocked.Exchange(ref _stopping, 0);
+        _commandQueue = Channel.CreateBounded<CommandWorkItem>(new BoundedChannelOptions(
+            Math.Clamp(_options.CommandQueueCapacity, 1, 10_000))
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false,
+        });
 
         var apci = new APCIParameters
         {
@@ -129,6 +171,11 @@ public sealed class Iec104Server : IAsyncDisposable
             // stalled centre cannot hold up the others.
             ServerMode = ServerMode.CONNECTION_IS_REDUNDANCY_GROUP,
             MaxOpenConnections = Math.Max(1, _options.MaxConnections),
+            MaxQueueSize = Math.Clamp(_options.OutboundQueueCapacity, 64, 100_000),
+            MaxHighPrioQueueSize = Math.Clamp(_options.CommandQueueCapacity * 2, 64, 10_000),
+            // Make overload observable. REMOVE_OLDEST silently loses telemetry inside lib60870,
+            // outside all gateway counters and before the control centre can acknowledge it.
+            EnqueueMode = EnqueueMode.THROW_EXCEPTION,
         };
         server.SetLocalAddress(_options.BindAddress);
         server.SetLocalPort(_options.Port);
@@ -152,10 +199,11 @@ public sealed class Iec104Server : IAsyncDisposable
 
         _cts = new CancellationTokenSource();
         // Keep the newest batches: state, not history, is what the control centre acts on.
-        _subscription = _tags.Subscribe("iec104", capacity: 4096, dropOldest: true);
-        _pump = Task.Run(() => PumpAsync(_cts.Token));
+        _subscription = _tags.Subscribe("iec104", capacity: Math.Clamp(_options.OutboundQueueCapacity, 64, 100_000), dropOldest: true);
+        _pump = Task.Run(() => SuperviseAsync("reporting", PumpAsync, _cts.Token));
+        _commandPump = Task.Run(() => SuperviseAsync("command dispatcher", CommandPumpAsync, _cts.Token));
         if (_options.PeriodicIntervalSeconds > 0)
-            _periodic = Task.Run(() => PeriodicAsync(_cts.Token));
+            _periodic = Task.Run(() => SuperviseAsync("periodic transmission", PeriodicAsync, _cts.Token));
 
         _logger.LogInformation(
             "IEC-104 controlled station listening on {Address}:{Port} (CA={Ca}, {Points} point(s))",
@@ -204,14 +252,18 @@ public sealed class Iec104Server : IAsyncDisposable
 
     public async Task StopAsync()
     {
+        Interlocked.Exchange(ref _stopping, 1);
+        _commandQueue?.Writer.TryComplete();
         _cts?.Cancel();
-        foreach (var task in new[] { _pump, _periodic })
+        foreach (var task in new[] { _pump, _periodic, _commandPump })
         {
             if (task is null)
                 continue;
             try { await task; } catch (OperationCanceledException) { /* expected */ }
         }
-        _pump = _periodic = null;
+        _pump = _periodic = _commandPump = null;
+        _commandQueue = null;
+        Interlocked.Exchange(ref _pendingCommands, 0);
 
         _subscription?.Dispose();
         _subscription = null;
@@ -231,31 +283,93 @@ public sealed class Iec104Server : IAsyncDisposable
 
     public async ValueTask DisposeAsync() => await StopAsync();
 
+    private async Task SuperviseAsync(string name, Func<CancellationToken, Task> loop, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                Pulse(name);
+                await loop(ct).ConfigureAwait(false);
+                if (ct.IsCancellationRequested) return;
+                throw new InvalidOperationException($"IEC-104 {name} loop returned unexpectedly.");
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+            catch (Exception ex)
+            {
+                Interlocked.Increment(ref _loopRestarts);
+                _lastError = $"{name} restarted: {ex.Message}";
+                Pulse(name, ex);
+                _logger.LogError(ex, "IEC-104 {Loop} loop stopped; restarting", name);
+                await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
+            }
+        }
+    }
+
     // --- outgoing: spontaneous reporting -------------------------------------
 
     private async Task PumpAsync(CancellationToken ct)
     {
         var subscription = _subscription!;
+        var pending = new Dictionary<int, (Iec104PointDto Point, TagValue Value)>();
+        var capacity = Math.Clamp(_options.OutboundQueueCapacity, 64, 100_000);
+        var limiter = new PointRateLimiter(Math.Clamp(_options.MaxSpontaneousPerSecond, 1, 100_000));
         try
         {
-            await foreach (var batch in subscription.Reader.ReadAllAsync(ct))
+            while (!ct.IsCancellationRequested)
             {
-                foreach (var read in batch)
+                if (pending.Count == 0 && !await WaitForUpdatesAsync(subscription.Reader, "reporting", ct))
                 {
-                    if (!_byTagPath.TryGetValue(read.TagId, out var points))
-                        continue;
+                    if (ct.IsCancellationRequested) break;
+                    var closed = new InvalidOperationException("IEC-104 reporting subscription closed unexpectedly.");
+                    _lastError = closed.Message;
+                    Pulse("reporting", closed);
+                    await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                }
 
-                    foreach (var point in points)
+                while (subscription.Reader.TryRead(out var batch))
+                {
+                    foreach (var read in batch)
                     {
-                        _lastReported.TryGetValue(point.Ioa, out var previous);
-                        if (!Iec104ValueMapping.ExceedsDeadband(point, previous, read.Value))
+                        if (!_byTagPath.TryGetValue(read.TagId, out var points))
                             continue;
-
-                        _lastReported[point.Ioa] = read.Value;
-                        if (Send(CauseOfTransmission.SPONTANEOUS, point, read.Value))
-                            Interlocked.Increment(ref _spontaneousSent);
+                        foreach (var point in points)
+                        {
+                            _lastReported.TryGetValue(point.Ioa, out var previous);
+                            if (!Iec104ValueMapping.ExceedsDeadband(point, previous, read.Value))
+                                continue;
+                            if (pending.ContainsKey(point.Ioa))
+                                Interlocked.Increment(ref _coalescedUpdates);
+                            else if (pending.Count >= capacity)
+                            {
+                                Interlocked.Increment(ref _capacityDrops);
+                                continue;
+                            }
+                            pending[point.Ioa] = (point, read.Value);
+                        }
                     }
                 }
+
+                Volatile.Write(ref _pendingOutbound, pending.Count);
+
+                // Same rule as the telemetry bridge: the pulse says "this loop completed a pass", not
+                // "a point moved". The tag channel is never idle on a polling gateway, so the 5 s idle
+                // heartbeat in WaitForUpdatesAsync is unreachable here; a station whose points all sit
+                // inside their deadbands would otherwise be reported stale while working perfectly.
+                Pulse("reporting");
+                if (pending.Count == 0)
+                    continue;
+
+                var permitted = await limiter.TakeAsync(Math.Min(pending.Count, 512), ct);
+                var outgoing = pending.Take(permitted).Select(x => (x.Value.Point, (TagValue?)x.Value.Value)).ToList();
+                foreach (var item in outgoing)
+                {
+                    pending.Remove(item.Point.Ioa);
+                }
+                var sent = SendMany(CauseOfTransmission.SPONTANEOUS, outgoing);
+                Interlocked.Add(ref _spontaneousSent, sent);
+                Volatile.Write(ref _pendingOutbound, pending.Count);
+                Pulse("reporting");
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -266,6 +380,7 @@ public sealed class Iec104Server : IAsyncDisposable
         {
             _lastError = ex.Message;
             _logger.LogError(ex, "IEC-104 reporting loop stopped unexpectedly");
+            throw;
         }
     }
 
@@ -281,22 +396,24 @@ public sealed class Iec104Server : IAsyncDisposable
         var period = TimeSpan.FromSeconds(_options.PeriodicIntervalSeconds);
         try
         {
-            using var timer = new PeriodicTimer(period);
-            while (await timer.WaitForNextTickAsync(ct))
+            var nextCycle = DateTimeOffset.UtcNow + period;
+            while (!ct.IsCancellationRequested)
             {
+                await DelayWithHeartbeatAsync(nextCycle - DateTimeOffset.UtcNow, "periodic transmission", ct);
                 var snapshot = _tags.Snapshot();
-                foreach (var point in _byIoa.Values.OrderBy(p => p.Ioa))
+                var points = _byIoa.Values.OrderBy(p => p.Ioa).ToArray();
+                var spread = points.Length == 0 ? TimeSpan.Zero
+                    : TimeSpan.FromTicks(Math.Max(1, period.Ticks / points.Length));
+                foreach (var batch in points.Chunk(64))
                 {
-                    var value = Lookup(snapshot, point);
-
-                    // A cyclic send is still a report: it becomes the baseline the deadband measures
-                    // the next change against. A point with no value at all leaves the baseline alone,
-                    // so the first real reading is still treated as news.
-                    if (value is not null)
-                        _lastReported[point.Ioa] = value;
-
-                    Send(CauseOfTransmission.PERIODIC, point, value);
+                    SendMany(CauseOfTransmission.PERIODIC,
+                        batch.Select(point => (point, Lookup(snapshot, point))).ToList());
+                    await DelayWithHeartbeatAsync(TimeSpan.FromTicks(spread.Ticks * batch.Length),
+                        "periodic transmission", ct);
                 }
+                nextCycle += period;
+                if (nextCycle < DateTimeOffset.UtcNow)
+                    nextCycle = DateTimeOffset.UtcNow + period;
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -307,35 +424,139 @@ public sealed class Iec104Server : IAsyncDisposable
         {
             _lastError = ex.Message;
             _logger.LogError(ex, "IEC-104 periodic transmission loop stopped unexpectedly");
+            throw;
         }
     }
 
-    /// <summary>Queue one point to every active connection. False when it could not be represented.</summary>
-    private bool Send(CauseOfTransmission cot, Iec104PointDto point, TagValue? value)
+    /// <summary>Queue points to every active connection, packing compatible objects into ASDUs.</summary>
+    private int SendMany(CauseOfTransmission cot,
+        IReadOnlyList<(Iec104PointDto Point, TagValue? Value)> values)
     {
         var server = _server;
         if (server is null)
-            return false;
+            return 0;
 
-        var informationObject = Iec104ValueMapping.ToInformationObject(point, value, _options.TimestampsInUtc);
-        if (informationObject is null)
-            return false;
+        var sent = 0;
+        foreach (var group in values.GroupBy(x => (x.Point.Type, x.Point.WithTimestamp)))
+        {
+            ASDU? asdu = null;
+            var included = new List<(Iec104PointDto Point, TagValue? Value)>();
 
-        try
-        {
-            var asdu = new ASDU(server.GetApplicationLayerParameters(), cot,
-                isTest: false, isNegative: false, oa: 0, ca: _options.CommonAddress, isSequence: false);
-            asdu.AddInformationObject(informationObject);
-            server.EnqueueASDU(asdu);
-            MarkSent();
-            return true;
+            void Flush()
+            {
+                if (asdu is null || included.Count == 0) return;
+                try
+                {
+                    server.EnqueueASDU(asdu);
+                    MarkSent();
+                    sent += included.Count;
+                    foreach (var item in included)
+                        if (item.Value is not null)
+                            _lastReported[item.Point.Ioa] = item.Value;
+                }
+                catch (Exception ex)
+                {
+                    Interlocked.Add(ref _capacityDrops, included.Count);
+                    _lastError = ex.Message;
+                    _logger.LogWarning(ex, "IEC-104: outbound queue refused {Count} information object(s)", included.Count);
+                }
+                asdu = null;
+                included.Clear();
+            }
+
+            foreach (var item in group)
+            {
+                var informationObject = Iec104ValueMapping.ToInformationObject(item.Point, item.Value, _options.TimestampsInUtc);
+                if (informationObject is null)
+                {
+                    Interlocked.Increment(ref _capacityDrops);
+                    continue;
+                }
+
+                asdu ??= NewAsdu(server, cot);
+                if (!asdu.AddInformationObject(informationObject))
+                {
+                    Flush();
+                    asdu = NewAsdu(server, cot);
+                    if (!asdu.AddInformationObject(informationObject))
+                    {
+                        Interlocked.Increment(ref _capacityDrops);
+                        _logger.LogWarning("IEC-104: IOA {Ioa} cannot fit in an empty ASDU", item.Point.Ioa);
+                        asdu = null;
+                        continue;
+                    }
+                }
+                included.Add(item);
+            }
+            Flush();
         }
-        catch (Exception ex)
+        return sent;
+    }
+
+    private ASDU NewAsdu(CS104Server server, CauseOfTransmission cot) =>
+        new(server.GetApplicationLayerParameters(), cot,
+            isTest: false, isNegative: false, oa: 0, ca: _options.CommonAddress, isSequence: false);
+
+    private int SendOnConnection(IMasterConnection connection, CauseOfTransmission cot,
+        IReadOnlyList<(Iec104PointDto Point, TagValue? Value)> values, bool updateBaseline)
+    {
+        var sent = 0;
+        foreach (var group in values.GroupBy(x => (x.Point.Type, x.Point.WithTimestamp)))
         {
-            _lastError = ex.Message;
-            _logger.LogWarning(ex, "IEC-104: could not queue IOA {Ioa}", point.Ioa);
-            return false;
+            ASDU? asdu = null;
+            var included = new List<(Iec104PointDto Point, TagValue? Value)>();
+
+            void Flush()
+            {
+                if (asdu is null || included.Count == 0) return;
+                try
+                {
+                    connection.SendASDU(asdu);
+                    MarkSent();
+                    sent += included.Count;
+                    if (updateBaseline)
+                        foreach (var item in included)
+                            if (item.Value is not null)
+                                _lastReported[item.Point.Ioa] = item.Value;
+                }
+                catch
+                {
+                    Interlocked.Add(ref _capacityDrops, included.Count);
+                    throw;
+                }
+                asdu = null;
+                included.Clear();
+            }
+
+            foreach (var item in group)
+            {
+                var informationObject = Iec104ValueMapping.ToInformationObject(item.Point, item.Value, _options.TimestampsInUtc);
+                if (informationObject is null)
+                {
+                    Interlocked.Increment(ref _capacityDrops);
+                    continue;
+                }
+
+                asdu ??= new ASDU(connection.GetApplicationLayerParameters(), cot,
+                    isTest: false, isNegative: false, oa: 0, ca: _options.CommonAddress, isSequence: false);
+                if (!asdu.AddInformationObject(informationObject))
+                {
+                    Flush();
+                    asdu = new ASDU(connection.GetApplicationLayerParameters(), cot,
+                        isTest: false, isNegative: false, oa: 0, ca: _options.CommonAddress, isSequence: false);
+                    if (!asdu.AddInformationObject(informationObject))
+                    {
+                        Interlocked.Increment(ref _capacityDrops);
+                        _logger.LogWarning("IEC-104: IOA {Ioa} cannot fit in an empty response ASDU", item.Point.Ioa);
+                        asdu = null;
+                        continue;
+                    }
+                }
+                included.Add(item);
+            }
+            Flush();
         }
+        return sent;
     }
 
     // Counters and the "last traffic" stamps move together: a counter alone cannot tell an engineer
@@ -363,6 +584,11 @@ public sealed class Iec104Server : IAsyncDisposable
     /// </summary>
     private bool OnConnectionRequest(object? parameter, System.Net.IPAddress address)
     {
+        if (!_options.AllowedClients.Any(rule => IpMatches(address, rule)))
+        {
+            _logger.LogWarning("IEC-104: refused control centre {Address}; it is not in AllowedClients", address);
+            return false;
+        }
         var key = address.ToString();
         _connections.AddOrUpdate(key,
             _ => (1, DateTimeOffset.UtcNow),
@@ -386,6 +612,8 @@ public sealed class Iec104Server : IAsyncDisposable
         if (_connections.TryGetValue(key, out var remaining) && remaining.Count == 0)
             _connections.TryRemove(key, out _);
         _logger.LogInformation("IEC-104: control centre {Address} disconnected", key);
+        foreach (var item in _selected.Where(kv => ReferenceEquals(kv.Value.Connection, connection)).ToList())
+            _selected.TryRemove(item.Key, out _);
     }
 
     /// <summary>
@@ -408,21 +636,9 @@ public sealed class Iec104Server : IAsyncDisposable
             connection.SendACT_CON(asdu, false);
 
             var snapshot = _tags.Snapshot();
-            foreach (var point in _byIoa.Values.OrderBy(p => p.Ioa))
-            {
-                var value = Lookup(snapshot, point);
-                _lastReported[point.Ioa] = value ?? _lastReported.GetValueOrDefault(point.Ioa)!;
-                var informationObject = Iec104ValueMapping.ToInformationObject(point, value, _options.TimestampsInUtc);
-                if (informationObject is null)
-                    continue;
-
-                var response = new ASDU(connection.GetApplicationLayerParameters(),
-                    CauseOfTransmission.INTERROGATED_BY_STATION,
-                    isTest: false, isNegative: false, oa: 0, ca: _options.CommonAddress, isSequence: false);
-                response.AddInformationObject(informationObject);
-                connection.SendASDU(response);
-                MarkSent();
-            }
+            SendOnConnection(connection, CauseOfTransmission.INTERROGATED_BY_STATION,
+                _byIoa.Values.OrderBy(p => p.Ioa).Select(p => (p, Lookup(snapshot, p))).ToList(),
+                updateBaseline: true);
 
             connection.SendACT_TERM(asdu);
             Interlocked.Increment(ref _interrogationsServed);
@@ -482,19 +698,8 @@ public sealed class Iec104Server : IAsyncDisposable
 
         try
         {
-            foreach (var point in counters)
-            {
-                var informationObject = Iec104ValueMapping.ToInformationObject(point, Lookup(snapshot, point), _options.TimestampsInUtc);
-                if (informationObject is null)
-                    continue;
-
-                var response = new ASDU(server.GetApplicationLayerParameters(),
-                    CauseOfTransmission.REQUESTED_BY_GENERAL_COUNTER,
-                    isTest: false, isNegative: false, oa: 0, ca: _options.CommonAddress, isSequence: false);
-                response.AddInformationObject(informationObject);
-                server.EnqueueASDU(response);
-                MarkSent();
-            }
+            SendOnConnection(connection, CauseOfTransmission.REQUESTED_BY_GENERAL_COUNTER,
+                counters.Select(p => (p, Lookup(snapshot, p))).ToList(), updateBaseline: false);
             connection.SendACT_TERM(request);
         }
         catch (Exception ex)
@@ -525,11 +730,9 @@ public sealed class Iec104Server : IAsyncDisposable
                 return true;
             }
 
-            var response = new ASDU(connection.GetApplicationLayerParameters(), CauseOfTransmission.REQUEST,
-                isTest: false, isNegative: false, oa: 0, ca: _options.CommonAddress, isSequence: false);
-            response.AddInformationObject(informationObject);
-            connection.SendASDU(response);
-            MarkSent();
+            if (SendOnConnection(connection, CauseOfTransmission.REQUEST, [(point, Lookup(_tags.Snapshot(), point))],
+                    updateBaseline: false) == 0)
+                SendNegative(connection, asdu);
         }
         catch (Exception ex)
         {
@@ -667,57 +870,271 @@ public sealed class Iec104Server : IAsyncDisposable
         // Select/execute: a select is only confirmed and remembered; the execute does the work.
         if (select)
         {
-            _selected[ioa] = DateTimeOffset.UtcNow;
+            if (_selected.TryGetValue(ioa, out var held)
+                && DateTimeOffset.UtcNow - held.SelectedAt <= SelectWindow
+                && !ReferenceEquals(held.Connection, connection))
+            {
+                Reject(connection, asdu);
+                return true;
+            }
+            _selected[ioa] = new Selection(connection, asdu.TypeId, value!, DateTimeOffset.UtcNow);
             connection.SendACT_CON(asdu, false);
+            Audit(connection, asdu, "select", "Successful", null);
             return true;
         }
 
-        if (point.Command is Iec104CommandType.SingleCommand or Iec104CommandType.DoubleCommand
-            && _selected.TryGetValue(ioa, out var selectedAt)
-            && DateTimeOffset.UtcNow - selectedAt > SelectWindow)
+        var hasSelection = _selected.TryGetValue(ioa, out var selected);
+        if (point.RequireSelect || hasSelection)
         {
             _selected.TryRemove(ioa, out _);
+            var valid = hasSelection && selected is not null
+                && ReferenceEquals(selected.Connection, connection)
+                && selected.TypeId == asdu.TypeId
+                && Equals(selected.Value, value)
+                && DateTimeOffset.UtcNow - selected.SelectedAt <= SelectWindow;
+            if (!valid)
+            {
             _logger.LogWarning("IEC-104: execute for IOA {Ioa} refused — the select expired", ioa);
             Reject(connection, asdu);
-            return true;
+                return true;
+            }
         }
         _selected.TryRemove(ioa, out _);
 
-        connection.SendACT_CON(asdu, false);
-
-        // The write happens off the protocol thread: a device that is slow to accept must not stall
-        // the link, and ACT_TERM is what reports the real outcome.
-        _ = Task.Run(async () =>
+        // Never let control-centre traffic create unbounded Tasks. The synchronous protocol callback
+        // only admits the command into a bounded queue; one dispatcher then preserves command order
+        // and applies a deadline that includes time spent waiting behind earlier commands.
+        var queue = _commandQueue;
+        if (queue is null || Volatile.Read(ref _stopping) != 0)
         {
-            try
-            {
-                await _writer(point.TagPath, value!, CancellationToken.None);
-                Interlocked.Increment(ref _commandsAccepted);
-                connection.SendACT_TERM(asdu);
-                _logger.LogInformation("IEC-104: command {Type} IOA {Ioa} wrote {Value} to {Tag}",
-                    asdu.TypeId, ioa, value, point.TagPath);
-            }
-            catch (Exception ex)
-            {
-                Interlocked.Increment(ref _commandsRejected);
-                _lastError = ex.Message;
-                _logger.LogError(ex, "IEC-104: command {Type} IOA {Ioa} failed", asdu.TypeId, ioa);
-                try
-                {
-                    // Terminate negatively so the dispatcher sees the command did not take effect.
-                    var termination = new ASDU(connection.GetApplicationLayerParameters(),
-                        CauseOfTransmission.ACTIVATION_TERMINATION,
-                        isTest: false, isNegative: true, oa: 0, ca: asdu.Ca, isSequence: false);
-                    termination.AddInformationObject(asdu.GetElement(0));
-                    connection.SendASDU(termination);
-                }
-                catch (Exception sendEx)
-                {
-                    _logger.LogWarning(sendEx, "IEC-104: could not report the failed command");
-                }
-            }
-        });
+            Reject(connection, asdu);
+            return true;
+        }
 
+        var remote = (connection as ClientConnection)?.RemoteEndpoint?.Address.ToString();
+        var command = new CommandWorkItem(connection, asdu, point, value!, remote, DateTimeOffset.UtcNow);
+        Interlocked.Increment(ref _pendingCommands);
+        if (!queue.Writer.TryWrite(command))
+        {
+            Interlocked.Decrement(ref _pendingCommands);
+            _logger.LogWarning("IEC-104: command {Type} IOA {Ioa} refused — command queue is full ({Capacity})",
+                asdu.TypeId, ioa, Math.Clamp(_options.CommandQueueCapacity, 1, 10_000));
+            Reject(connection, asdu);
+            return true;
+        }
+
+        try
+        {
+            connection.SendACT_CON(asdu, false);
+            MarkSent();
+            command.Confirmed.TrySetResult(true);
+        }
+        catch (Exception ex)
+        {
+            command.Confirmed.TrySetResult(false);
+            Interlocked.Increment(ref _commandsRejected);
+            _lastError = ex.Message;
+            _logger.LogWarning(ex, "IEC-104: could not confirm command {Type} IOA {Ioa}", asdu.TypeId, ioa);
+        }
+
+        return true;
+    }
+
+    private async Task CommandPumpAsync(CancellationToken ct)
+    {
+        var queue = _commandQueue!;
+        try
+        {
+            while (await WaitForUpdatesAsync(queue.Reader, "command dispatcher", ct))
+            {
+                while (queue.Reader.TryRead(out var command))
+                {
+                    Interlocked.Decrement(ref _pendingCommands);
+                    if (!await command.Confirmed.Task.WaitAsync(ct))
+                        continue;
+                    await ExecuteCommandAsync(command, ct);
+                    Pulse("command dispatcher");
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // StopAsync reports every already-confirmed command still in the queue as failed below.
+        }
+        finally
+        {
+            while (queue.Reader.TryRead(out var command))
+            {
+                Interlocked.Decrement(ref _pendingCommands);
+                if (command.Confirmed.Task.IsCompletedSuccessfully && command.Confirmed.Task.Result)
+                {
+                    Interlocked.Increment(ref _commandsRejected);
+                    SendFailedTermination(command, "the station is stopping");
+                }
+            }
+        }
+    }
+
+    private async Task<bool> WaitForUpdatesAsync<T>(ChannelReader<T> reader, string loop, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            using var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            heartbeat.CancelAfter(TimeSpan.FromSeconds(5));
+            try { return await reader.WaitToReadAsync(heartbeat.Token); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { Pulse(loop); }
+        }
+        return false;
+    }
+
+    private async Task DelayWithHeartbeatAsync(TimeSpan delay, string loop, CancellationToken ct)
+    {
+        var remaining = delay < TimeSpan.Zero ? TimeSpan.Zero : delay;
+        while (remaining > TimeSpan.Zero)
+        {
+            var slice = remaining > TimeSpan.FromSeconds(5) ? TimeSpan.FromSeconds(5) : remaining;
+            await Task.Delay(slice, ct);
+            remaining -= slice;
+            Pulse(loop);
+        }
+    }
+
+    private void Pulse(string loop, Exception? failure = null)
+    {
+        try { _loopHealth?.Invoke(loop, failure); }
+        catch (Exception ex) { _logger.LogDebug(ex, "IEC-104 loop-health observer failed"); }
+    }
+
+    private sealed class PointRateLimiter
+    {
+        private readonly double _rate;
+        private readonly double _capacity;
+        private double _tokens;
+        private long _last = Stopwatch.GetTimestamp();
+
+        public PointRateLimiter(int rate)
+        {
+            _rate = rate;
+            _capacity = Math.Max(1, rate / 5d); // at most a 200 ms startup burst
+            _tokens = _capacity;
+        }
+
+        public async Task<int> TakeAsync(int maximum, CancellationToken ct)
+        {
+            while (true)
+            {
+                var now = Stopwatch.GetTimestamp();
+                _tokens = Math.Min(_capacity, _tokens + Stopwatch.GetElapsedTime(_last, now).TotalSeconds * _rate);
+                _last = now;
+                var available = Math.Min(maximum, (int)_tokens);
+                if (available > 0)
+                {
+                    _tokens -= available;
+                    return available;
+                }
+                var wait = TimeSpan.FromSeconds(Math.Max(0.001, (1 - _tokens) / _rate));
+                await Task.Delay(wait, ct);
+            }
+        }
+    }
+
+    private async Task ExecuteCommandAsync(CommandWorkItem command, CancellationToken serverToken)
+    {
+        var timeout = TimeSpan.FromMilliseconds(Math.Clamp(_options.CommandTimeoutMs, 100, 600_000));
+        var remaining = timeout - (DateTimeOffset.UtcNow - command.AcceptedAt);
+        if (remaining <= TimeSpan.Zero)
+        {
+            CommandTimedOut(command);
+            return;
+        }
+
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(serverToken);
+        deadline.CancelAfter(remaining);
+        try
+        {
+            await _writer(command.Point.TagPath, command.Value, command.RemoteAddress, deadline.Token);
+            Interlocked.Increment(ref _commandsAccepted);
+            command.Connection.SendACT_TERM(command.Asdu);
+            MarkSent();
+            _logger.LogInformation("IEC-104: command {Type} IOA {Ioa} wrote {Value} to {Tag}",
+                command.Asdu.TypeId, command.Point.Ioa, command.Value, command.Point.TagPath);
+        }
+        catch (OperationCanceledException) when (!serverToken.IsCancellationRequested && deadline.IsCancellationRequested)
+        {
+            CommandTimedOut(command);
+        }
+        catch (OperationCanceledException) when (serverToken.IsCancellationRequested)
+        {
+            Interlocked.Increment(ref _commandsRejected);
+            SendFailedTermination(command, "the station is stopping");
+        }
+        catch (Exception ex)
+        {
+            Interlocked.Increment(ref _commandsRejected);
+            _lastError = ex.Message;
+            _logger.LogError(ex, "IEC-104: command {Type} IOA {Ioa} failed", command.Asdu.TypeId, command.Point.Ioa);
+            SendFailedTermination(command, ex.Message);
+        }
+    }
+
+    private void CommandTimedOut(CommandWorkItem command)
+    {
+        Interlocked.Increment(ref _commandsRejected);
+        Interlocked.Increment(ref _commandTimeouts);
+        var reason = $"command exceeded {_options.CommandTimeoutMs} ms deadline";
+        _lastError = reason;
+        _logger.LogWarning("IEC-104: command {Type} IOA {Ioa} timed out after {Timeout} ms",
+            command.Asdu.TypeId, command.Point.Ioa, _options.CommandTimeoutMs);
+        SendFailedTermination(command, reason);
+    }
+
+    private void SendFailedTermination(CommandWorkItem command, string reason)
+    {
+        try
+        {
+            var termination = new ASDU(command.Connection.GetApplicationLayerParameters(),
+                CauseOfTransmission.ACTIVATION_TERMINATION,
+                isTest: false, isNegative: true, oa: 0, ca: command.Asdu.Ca, isSequence: false);
+            if (!termination.AddInformationObject(command.Asdu.GetElement(0)))
+                throw new InvalidOperationException("The failed command object cannot fit in an empty termination ASDU.");
+            command.Connection.SendASDU(termination);
+            MarkSent();
+        }
+        catch (Exception sendEx)
+        {
+            _lastError = $"{reason}; failure response could not be sent: {sendEx.Message}";
+            _logger.LogWarning(sendEx, "IEC-104: could not report the failed command");
+        }
+    }
+
+    private sealed record CommandWorkItem(IMasterConnection Connection, ASDU Asdu,
+        Iec104PointDto Point, object Value, string? RemoteAddress, DateTimeOffset AcceptedAt)
+    {
+        public TaskCompletionSource<bool> Confirmed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed record Selection(IMasterConnection Connection, TypeID TypeId, object Value,
+        DateTimeOffset SelectedAt);
+
+    private static bool IpMatches(System.Net.IPAddress address, string rule)
+    {
+        var parts = rule.Trim().Split('/', 2);
+        if (!System.Net.IPAddress.TryParse(parts[0], out var network)) return false;
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (network.IsIPv4MappedToIPv6) network = network.MapToIPv4();
+        var candidate = address.GetAddressBytes();
+        var expected = network.GetAddressBytes();
+        if (candidate.Length != expected.Length) return false;
+        var bits = parts.Length == 1 ? candidate.Length * 8
+            : int.TryParse(parts[1], out var parsed) ? parsed : -1;
+        if (bits < 0 || bits > candidate.Length * 8) return false;
+        for (var i = 0; i < candidate.Length && bits > i * 8; i++)
+        {
+            var remaining = bits - i * 8;
+            var mask = remaining >= 8 ? 0xff : (0xff << (8 - remaining)) & 0xff;
+            if ((candidate[i] & mask) != (expected[i] & mask)) return false;
+        }
         return true;
     }
 
@@ -792,7 +1209,21 @@ public sealed class Iec104Server : IAsyncDisposable
     private void Reject(IMasterConnection connection, ASDU asdu)
     {
         Interlocked.Increment(ref _commandsRejected);
+        Audit(connection, asdu, "command", "Rejected", "Rejected by IEC-104 command policy.");
         SendNegative(connection, asdu);
+    }
+
+    private void Audit(IMasterConnection connection, ASDU asdu, string action, string outcome, string? reason)
+    {
+        if (_audit is null) return;
+        TryReadCommand(asdu, out var ioa, out var value, out _, out _);
+        _byIoa.TryGetValue(ioa, out var point);
+        var remote = (connection as ClientConnection)?.RemoteEndpoint?.Address.ToString() ?? "unknown";
+        var task = _audit(new Iec104ControlAudit(DateTimeOffset.UtcNow, remote, action, ioa,
+            point?.TagPath, value, outcome, reason));
+        _ = task.ContinueWith(t => _logger.LogError(t.Exception, "IEC-104 audit persistence failed"),
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private void SendNegative(IMasterConnection connection, ASDU asdu)

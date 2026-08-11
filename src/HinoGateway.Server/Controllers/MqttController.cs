@@ -13,11 +13,13 @@ public sealed class MqttController : ControllerBase
 {
     private readonly IConfigStore _store;
     private readonly MqttHostedService _mqtt;
+    private readonly ISecretStore _secrets;
 
-    public MqttController(IConfigStore store, MqttHostedService mqtt)
+    public MqttController(IConfigStore store, MqttHostedService mqtt, ISecretStore secrets)
     {
         _store = store;
         _mqtt = mqtt;
+        _secrets = secrets;
     }
 
     [HttpGet]
@@ -33,6 +35,7 @@ public sealed class MqttController : ControllerBase
     {
         var errors = ProjectValidator.ValidateMqtt(options);
         if (errors.Count > 0) return BadRequest(errors);
+        SecretConfiguration.ProtectMqtt(options, _secrets, clearEmpty: true);
         await _store.SaveMqttAsync(options, ct);
         return NoContent();
     }

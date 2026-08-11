@@ -12,8 +12,25 @@ public sealed record LoadProfile
     public bool MixedFaults { get; init; }
     public bool FullStack { get; init; }
     public int MinThreads { get; init; }
+    public int ReloadEverySeconds { get; init; }
+    public int ForcedGcEveryReloads { get; init; }
     public double MinPollRatio { get; init; } = 0.85;
     public double MaxSampleLatenessSeconds { get; init; } = 2.0;
+
+    /// <summary>
+    /// Share of offered IEC-104 updates that may be refused because the outbound path is already at
+    /// <c>MaxSpontaneousPerSecond</c>. Zero everywhere except where the profile deliberately offers
+    /// more than the configured ceiling: a drop there is the rate limiter doing its job, and demanding
+    /// zero would make the run assert that the ceiling is never reached rather than that it holds.
+    /// </summary>
+    public double MaxIecCapacityDropRatio { get; init; }
+
+    /// <summary>
+    /// Whether the MQTT spool is allowed to reach its byte cap and trim. The probe runs with no broker
+    /// at all, so the spool has input and no drain: over a long run it MUST bound itself, and trimming
+    /// is the behaviour under test rather than a failure.
+    /// </summary>
+    public bool AllowMqttSpoolTrim { get; init; }
 
     public static readonly LoadProfile Mixed = new()
     {
@@ -39,9 +56,28 @@ public sealed record LoadProfile
         Name = "fullstack", Description = "100 x 100 plus independent northbound/diagnostics consumers",
         Devices = 100, TagsPerDevice = 100, FullStack = true,
     };
+    public static readonly LoadProfile Chaos = new()
+    {
+        Name = "chaos", Description = "mixed link faults + full northbound stack + repeated hot reloads",
+        Devices = 100, TagsPerDevice = 100, RunSeconds = 120, MixedFaults = true, FullStack = true,
+        ReloadEverySeconds = 10, MinPollRatio = 0.75,
+    };
+    public static readonly LoadProfile Soak = new()
+    {
+        Name = "soak", Description = "30-minute 250 x 100 full-stack endurance and periodic reload",
+        Devices = 250, TagsPerDevice = 100, RunSeconds = 1800, FullStack = true,
+        ReloadEverySeconds = 60, MinPollRatio = 0.80,
+        ForcedGcEveryReloads = 5,
+        // 250 x 100 tags feed 2000 mapped IEC points past a 500/s ceiling, and MQTT spools for half an
+        // hour with no broker. Both saturate by design at this scale; measured 2.86% IEC overflow and
+        // a spool that trimmed to its cap. Insisting on zero made the endurance run unpassable, which
+        // is worse than useless for a gate the release notes tell operators to clear before rollout.
+        MaxIecCapacityDropRatio = 0.05,
+        AllowMqttSpoolTrim = true,
+    };
 
     public static readonly IReadOnlyList<LoadProfile> All =
-        [Quick, Mixed, SlowLink, SlowLinkMinThreads, FullStackProfile];
+        [Quick, Mixed, SlowLink, SlowLinkMinThreads, FullStackProfile, Chaos, Soak];
 
     public static LoadProfile? ByName(string name) =>
         All.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));

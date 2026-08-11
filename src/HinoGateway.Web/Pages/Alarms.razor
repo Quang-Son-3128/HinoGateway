@@ -4,6 +4,7 @@
 @using Microsoft.AspNetCore.SignalR.Client
 @implements IAsyncDisposable
 @inject NavigationManager Nav
+@inject HinoGateway.Web.Security.ApiKeyStore ApiKeys
 @inject HttpClient Http
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
@@ -218,7 +219,8 @@
         _pollTimer = new System.Threading.Timer(_ => InvokeAsync(RefreshAsync), null, 5000, 5000);
 
         _hub = new HubConnectionBuilder()
-            .WithUrl(Nav.ToAbsoluteUri("/hubs/alarms"))
+            .WithUrl(Nav.ToAbsoluteUri("/hubs/alarms"), options =>
+                options.AccessTokenProvider = ApiKeys.GetAsync)
             .WithAutomaticReconnect()
             .Build();
 
@@ -290,7 +292,7 @@
         _busy = true;
         try
         {
-            var resp = await Http.PostAsJsonAsync("api/alarms/ack", new { alarmId = alarm.AlarmId, all = false, user = Operator });
+            var resp = await Http.PostAsJsonAsync("api/alarms/ack", new { alarmId = alarm.AlarmId, all = false });
             if (resp.IsSuccessStatusCode)
                 await RefreshAsync();
             else
@@ -311,7 +313,7 @@
         _busy = true;
         try
         {
-            var resp = await Http.PostAsJsonAsync("api/alarms/ack", new { alarmId = (string?)null, all = true, user = Operator });
+            var resp = await Http.PostAsJsonAsync("api/alarms/ack", new { alarmId = (string?)null, all = true });
             if (resp.IsSuccessStatusCode)
             {
                 var result = await resp.Content.ReadFromJsonAsync<AckResult>();
@@ -327,10 +329,6 @@
     }
 
     private sealed record AckResult(int Acknowledged);
-
-    // No user accounts yet (Phase 3 item) — journal the acknowledgement against a generic operator
-    // so the audit trail is still honest about what happened, just not about who.
-    private const string Operator = "operator";
 
     private static bool IsLevel(AlarmCondition c) =>
         c is AlarmCondition.Hi or AlarmCondition.HiHi or AlarmCondition.Lo or AlarmCondition.LoLo;

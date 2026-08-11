@@ -122,7 +122,7 @@ public sealed class DeviceEngine : IAsyncDisposable
         {
             // 1. Build the new runtime first. Nothing here touches the running one, so if this
             //    throws (a driver bug), the gateway carries on with the configuration it has.
-            var next = Build(devices, internalTags);
+            var next = await BuildAsync(devices, internalTags);
 
             // 2. Publish the new routing snapshot first, then drain commands already routed to the
             //    previous one before disposing its drivers. New writes can no longer acquire the old
@@ -131,6 +131,10 @@ public sealed class DeviceEngine : IAsyncDisposable
             _runtime = next;
             await previous.RetireAndDrainAsync();
             await StopAsync(previous);
+            if (RequiresRestart)
+                throw new GatewayRestartRequiredException(
+                    "A previous device worker ignored its shutdown deadline. The replacement runtime was not started; " +
+                    "the service supervisor must restart this process to prevent duplicate workers.");
 
             // 3. Drop values of tags that no longer exist, and tell the operator about the tags of
             //    every rejected device instead of letting them silently vanish from the UI.
@@ -179,7 +183,10 @@ public sealed class DeviceEngine : IAsyncDisposable
         {
             var runtime = _runtime;
             if (!runtime.TryAcquireWrite(out var lease))
+            {
+                await Task.Yield();
                 continue; // reload retired it between the reference read and lease acquisition
+            }
 
             using (lease)
             {
@@ -198,6 +205,19 @@ public sealed class DeviceEngine : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Stable serialization key for control commands. Commands for one physical connection must
+    /// retain admission order even when the command service uses multiple workers; unrelated
+    /// connections may still execute concurrently.
+    /// </summary>
+    public string WritePartitionKey(string tagId)
+    {
+        var runtime = _runtime;
+        if (runtime.Internal is { } internals && internals.Owns(tagId))
+            return InternalDeviceId;
+        return runtime.WorkersByTag.TryGetValue(tagId, out var worker) ? worker.DeviceId : tagId;
+    }
+
     // --- building -------------------------------------------------------------
 
     /// <summary>
@@ -205,7 +225,7 @@ public sealed class DeviceEngine : IAsyncDisposable
     /// factory first; an unusable one becomes a faulted health entry with the reasons, and the rest
     /// of the configuration is unaffected.
     /// </summary>
-    private Runtime Build(IEnumerable<DeviceConfig> devices, IReadOnlyList<TagDefinition>? internalTags)
+    private async Task<Runtime> BuildAsync(IEnumerable<DeviceConfig> devices, IReadOnlyList<TagDefinition>? internalTags)
     {
         var configured = devices.ToList();
         var workers = new List<DeviceWorker>();
@@ -318,20 +338,33 @@ public sealed class DeviceEngine : IAsyncDisposable
         // memory values are seeded from what the tag store still holds, which is how an operator's
         // setpoint survives an "Apply to engine".
         InternalTagEngine? internals = null;
-        if (internalTags is { Count: > 0 })
+        try
         {
-            internals = new InternalTagEngine(Tags, _loggerFactory.CreateLogger("Tags.Internal"), _retained);
-            internals.Load(internalTags);
-            foreach (var tagId in internals.TagIds)
-                configuredTagIds.Add(tagId);
+            if (internalTags is { Count: > 0 })
+            {
+                internals = new InternalTagEngine(Tags, _loggerFactory.CreateLogger("Tags.Internal"), _retained);
+                internals.Load(internalTags);
+                foreach (var tagId in internals.TagIds)
+                    configuredTagIds.Add(tagId);
 
-            // A formula that does not compile is reported the same way a tag its driver refused is:
-            // the operator sees it on the apply, not only as a Bad tag on the Live page.
-            foreach (var (tagId, reason) in internals.Faults)
-                droppedTags.Add(new DroppedTag(InternalDeviceId, tagId, reason));
+                // A formula that does not compile is reported the same way a tag its driver refused is:
+                // the operator sees it on the apply, not only as a Bad tag on the Live page.
+                foreach (var (tagId, reason) in internals.Faults)
+                    droppedTags.Add(new DroppedTag(InternalDeviceId, tagId, reason));
+            }
+
+            return new Runtime(workers, workersByTag, rejected, rejectedTags, droppedTags, configuredTagIds, leases, internals);
         }
-
-        return new Runtime(workers, workersByTag, rejected, rejectedTags, droppedTags, configuredTagIds, leases, internals);
+        catch
+        {
+            if (internals is not null)
+                try { await internals.DisposeAsync(); } catch { }
+            foreach (var worker in workers)
+                try { await worker.DisposeAsync(); } catch { }
+            foreach (var lease in leases)
+                try { await lease.DisposeAsync(); } catch { }
+            throw;
+        }
 
         void Reject(DeviceConfig device, string reason)
         {
@@ -603,3 +636,5 @@ public sealed record EngineApplyResult(
 
 /// <summary>The request blocks one device's driver is issuing, and how each is behaving.</summary>
 public sealed record DeviceBlockDiagnostics(string DeviceId, IReadOnlyList<DriverBlockStat> Blocks);
+
+public sealed class GatewayRestartRequiredException(string message) : Exception(message);

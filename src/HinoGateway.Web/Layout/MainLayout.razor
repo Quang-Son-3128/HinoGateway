@@ -52,6 +52,7 @@
             <MudNavLink Href="alarm-rules" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Rule">Alarm Rules</MudNavLink>
             <MudNavLink Href="iec104" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.ElectricalServices">IEC-104 Link</MudNavLink>
             <MudNavLink Href="mqtt" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.CloudUpload">MQTT Link</MudNavLink>
+            <MudNavLink Href="access" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Key">Remote Access</MudNavLink>
         </MudNavMenu>
         <MudSpacer />
         <div class="hino-drawer-footer">
@@ -121,6 +122,7 @@
     private int _devicesConnected, _devicesTotal;
     private int _tagsTotal, _tagsGood, _tagsBad;
     private int _alarmsActive, _alarmsUnacked;
+    private int _healthRefreshRunning;
 
     protected override void OnInitialized()
     {
@@ -157,28 +159,30 @@
 
     private async Task RefreshHealthAsync()
     {
+        if (Interlocked.Exchange(ref _healthRefreshRunning, 1) != 0)
+            return;
         try
         {
-            var health = await Http.GetFromJsonAsync<List<HealthRow>>("api/health") ?? new();
-            var values = await Http.GetFromJsonAsync<List<TagSample>>("api/tags/values") ?? new();
-            var alarms = await Http.GetFromJsonAsync<AlarmSummary>("api/alarms/summary");
-            _devicesTotal = health.Count;
-            _devicesConnected = health.Count(h => h.State == DeviceState.Connected);
-            _tagsTotal = values.Count;
-            _tagsGood = values.Count(v => v.Quality == Quality.Good);
-            _tagsBad = values.Count(v => v.Quality == Quality.Bad);
-            _alarmsActive = alarms?.Active ?? 0;
-            _alarmsUnacked = alarms?.Unacknowledged ?? 0;
+            var stats = await Http.GetFromJsonAsync<GatewayStats>("api/stats");
+            _devicesTotal = stats?.DevicesTotal ?? 0;
+            _devicesConnected = stats?.DevicesConnected ?? 0;
+            _tagsTotal = stats?.TagsTotal ?? 0;
+            _tagsGood = stats?.TagsGood ?? 0;
+            _tagsBad = stats?.TagsBad ?? 0;
+            _alarmsActive = stats?.AlarmsActive ?? 0;
+            _alarmsUnacked = stats?.AlarmsUnacknowledged ?? 0;
             _serverOk = true;
         }
         catch
         {
             _serverOk = false;
         }
-        StateHasChanged();
+        finally
+        {
+            Interlocked.Exchange(ref _healthRefreshRunning, 0);
+            StateHasChanged();
+        }
     }
-
-    private sealed record HealthRow(string DeviceId, DeviceState State);
 
     public void Dispose()
     {

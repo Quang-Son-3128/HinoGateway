@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
 using HinoGateway.Server.Security;
+using HinoGateway.Server.Services;
 
 namespace HinoGateway.Server.Controllers;
 
@@ -64,6 +65,11 @@ public sealed class TagsController : ControllerBase
     [HttpGet("health")]
     public IReadOnlyList<DeviceHealth> GetHealth([FromServices] DeviceEngine engine) => engine.Health;
 
+    /// <summary>Supervised background components and any active operational alarms.</summary>
+    [HttpGet("health/components")]
+    public IReadOnlyList<ComponentHealth> GetComponentHealth([FromServices] ComponentHealthRegistry components) =>
+        components.Snapshot;
+
     /// <summary>
     /// What the drivers are actually putting on the wire: one entry per request block, with the
     /// address range it covers, how many tags it serves, its latency and whether the device is
@@ -91,7 +97,7 @@ public sealed class TagsController : ControllerBase
     [Authorize(Policy = GatewayPolicies.Operator)]
     [EnableRateLimiting("commands")]
     public async Task<IActionResult> Write([FromBody] WriteRequest request,
-        [FromServices] DeviceEngine engine, CancellationToken ct)
+        [FromServices] ControlCommandService commands)
     {
         if (string.IsNullOrWhiteSpace(request.TagId))
             return BadRequest("A tagId is required.");
@@ -100,27 +106,18 @@ public sealed class TagsController : ControllerBase
         if (value is null)
             return BadRequest("A value is required.");
 
-        try
+        var result = await commands.ExecuteAsync(new ControlCommand(
+            request.TagId, value, "REST", User.Identity?.Name ?? "unknown",
+            HttpContext.Connection.RemoteIpAddress?.ToString(), HttpContext.TraceIdentifier));
+        return result.Outcome switch
         {
-            await engine.WriteTagAsync(request.TagId, value, ct);
-            return NoContent();
-        }
-        catch (KeyNotFoundException e)
-        {
-            return NotFound(e.Message);
-        }
-        catch (TimeoutException e)
-        {
-            return StatusCode(StatusCodes.Status504GatewayTimeout, e.Message);
-        }
-        catch (InvalidOperationException e)
-        {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, e.Message);
-        }
-        catch (Exception e)
-        {
-            return BadRequest(e.Message);
-        }
+            ControlOutcome.Successful => Ok(result),
+            ControlOutcome.Unknown => StatusCode(StatusCodes.Status504GatewayTimeout, result),
+            ControlOutcome.Failed => StatusCode(StatusCodes.Status503ServiceUnavailable, result),
+            _ when result.Reason?.Contains("No running device", StringComparison.OrdinalIgnoreCase) == true => NotFound(result),
+            _ when result.Reason?.Contains("read-only", StringComparison.OrdinalIgnoreCase) == true => StatusCode(StatusCodes.Status403Forbidden, result),
+            _ => BadRequest(result),
+        };
     }
 
     public sealed record WriteRequest(string TagId, JsonElement Value);

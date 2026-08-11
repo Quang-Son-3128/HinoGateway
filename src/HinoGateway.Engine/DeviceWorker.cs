@@ -91,26 +91,56 @@ public sealed class DeviceWorker : IAsyncDisposable
                 _logger.LogInformation("Device {DeviceId}: connecting via {Driver}", _config.DeviceId, _config.Driver);
                 await _driver.ConnectAsync(ct);
                 SetState(DeviceState.Connected);
-                backoff = _backoffInitial; // reset after a successful connect
+                var consecutiveFailures = 0;
+                var failureThreshold = Math.Max(1, _config.FailureThreshold);
 
                 using var timer = new PeriodicTimer(_config.ScanInterval);
                 while (await timer.WaitForNextTickAsync(ct))
                 {
                     var sw = Stopwatch.StartNew();
                     IReadOnlyList<TagRead> reads;
-                    await _driverLock.WaitAsync(ct);
                     try
                     {
-                        reads = await _driver.PollAsync(ct);
+                        await _driverLock.WaitAsync(ct);
+                        try
+                        {
+                            reads = await _driver.PollAsync(ct);
+                        }
+                        finally
+                        {
+                            _driverLock.Release();
+                        }
                     }
-                    finally
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
                     {
-                        _driverLock.Release();
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        consecutiveFailures++;
+                        var transportGone = _driver is ITransportFaultClassifier classifier
+                            ? classifier.IsTransportFault(ex)
+                            : TransportFaults.IsConnectionGone(ex);
+
+                        if (transportGone || consecutiveFailures >= failureThreshold)
+                            throw;
+
+                        RecordTransientError(ex);
+                        _store.MarkUncertain(_config.Tags,
+                            $"Poll failed ({consecutiveFailures}/{failureThreshold}): {ex.Message}");
+                        _logger.LogWarning(ex,
+                            "Device {DeviceId}: transient poll failure {Failures}/{Threshold}; keeping the link open",
+                            _config.DeviceId, consecutiveFailures, failureThreshold);
+                        continue;
                     }
                     sw.Stop();
 
+                    consecutiveFailures = 0;
                     _store.Apply(ApplyScaling(reads));
                     RecordSuccess(sw.Elapsed);
+                    // A connected socket is not proof that the PLC recovered; a successful
+                    // protocol transaction is. Preserve exponential backoff until this point.
+                    backoff = _backoffInitial;
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -144,6 +174,7 @@ public sealed class DeviceWorker : IAsyncDisposable
     {
         if (!_tagsById.TryGetValue(tagId, out var tag))
             throw new KeyNotFoundException($"Tag '{tagId}' does not belong to device '{_config.DeviceId}'.");
+        TagWritePolicy.EnsureAllowed(tag, value);
         if (_health.State != DeviceState.Connected)
             throw new InvalidOperationException($"Device '{_config.DeviceId}' is not connected.");
 
@@ -213,6 +244,14 @@ public sealed class DeviceWorker : IAsyncDisposable
         LastSuccess = DateTimeOffset.UtcNow,
         LastPollLatency = latency,
         PollCount = _health.PollCount + 1,
+        LastError = null,
+    };
+
+    private void RecordTransientError(Exception ex) => _health = _health with
+    {
+        State = DeviceState.Connected,
+        LastError = ex.Message,
+        ErrorCount = _health.ErrorCount + 1,
     };
 
     private void RecordError(Exception ex) => _health = _health with

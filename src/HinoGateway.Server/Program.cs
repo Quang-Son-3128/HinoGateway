@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 using HinoGateway.Server;
 using HinoGateway.Server.Security;
 using HinoGateway.Core;
@@ -7,11 +9,52 @@ using HinoGateway.Engine;
 using HinoGateway.Server.Hubs;
 using HinoGateway.Server.Services;
 using HinoGateway.Storage;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+var dataPaths = GatewayDataPaths.Create(builder.Configuration, builder.Environment);
+builder.Services.AddSingleton(dataPaths);
+builder.Services.AddWindowsService(options => options.ServiceName = "HinoGateway");
+builder.Services.AddSystemd();
+builder.Host.UseSerilog((context, services, logging) => logging
+    .ReadFrom.Configuration(context.Configuration)
+    .ReadFrom.Services(services)
+    .Enrich.FromLogContext()
+    .WriteTo.Console()
+    .WriteTo.File(Path.Combine(dataPaths.Logs, "hinogateway-.log"), rollingInterval: RollingInterval.Day,
+        rollOnFileSizeLimit: true,
+        fileSizeLimitBytes: Math.Max(1, context.Configuration.GetValue<int?>("Serilog:File:FileSizeLimitMb") ?? 32) * 1024L * 1024L,
+        retainedFileCountLimit: context.Configuration.GetValue<int?>("Serilog:File:RetainedFileCountLimit") ?? 14,
+        shared: true));
 
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<ComponentHealthRegistry>();
+builder.Services.AddSingleton<AuditTrail>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AuditTrail>());
+builder.Services.AddHealthChecks()
+    .AddCheck<GatewayLivenessCheck>("gateway-live", tags: ["live"])
+    .AddCheck<GatewayReadinessCheck>("gateway-ready", tags: ["ready"]);
+
+var commandRatePerSecond = Math.Clamp(
+    builder.Configuration.GetValue<int?>("Commands:RateLimitPerSecond") ?? 20, 1, 10_000);
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("commands", context => RateLimitPartition.GetTokenBucketLimiter(
+        partitionKey: context.User.Identity?.Name
+                      ?? context.Connection.RemoteIpAddress?.ToString()
+                      ?? "unknown",
+        factory: _ => new TokenBucketRateLimiterOptions
+        {
+            TokenLimit = commandRatePerSecond,
+            TokensPerPeriod = commandRatePerSecond,
+            ReplenishmentPeriod = TimeSpan.FromSeconds(1),
+            AutoReplenishment = true,
+            QueueLimit = 0,
+        }));
+});
 
 // --- Configuration: one JSON project file, no database ------------------------
 // A gateway has to be deployable by copying a folder onto an industrial PC, so the configuration
@@ -22,14 +65,18 @@ builder.Services.AddSignalR();
 // the content root or the working directory, which differ depending on how the gateway was started
 // and would leave two configuration files quietly disagreeing with each other. The project file
 // travels with the binaries; set Config:Path to an absolute path to keep it elsewhere.
-var projectPath = builder.Configuration["Config:Path"] ?? "hino.json";
+var projectPath = dataPaths.Resolve(builder.Configuration["Config:Path"], dataPaths.Project);
 builder.Services.AddSingleton(sp => new JsonProjectStore(
-    System.IO.Path.IsPathRooted(projectPath)
-        ? projectPath
-        : System.IO.Path.Combine(AppContext.BaseDirectory, projectPath),
+    projectPath,
     sp.GetRequiredService<ILogger<JsonProjectStore>>()));
 builder.Services.AddSingleton<IConfigStore>(sp => sp.GetRequiredService<JsonProjectStore>());
 builder.Services.AddSingleton<IAlarmStore>(sp => sp.GetRequiredService<JsonProjectStore>());
+
+var secretsPath = dataPaths.Resolve(builder.Configuration["Config:SecretsPath"], dataPaths.Secrets);
+builder.Services.AddSingleton(sp => new JsonSecretStore(
+    secretsPath,
+    sp.GetRequiredService<ILogger<JsonSecretStore>>()));
+builder.Services.AddSingleton<ISecretStore>(sp => sp.GetRequiredService<JsonSecretStore>());
 
 // The local alarm trail is in memory on purpose: the durable record belongs to the upstream server.
 builder.Services.AddSingleton<IAlarmJournal>(sp => new InMemoryAlarmJournal(
@@ -39,11 +86,9 @@ builder.Services.AddSingleton<IAlarmJournal>(sp => new InMemoryAlarmJournal(
 // not configuration: it changes whenever an operator moves a setpoint, and it must not travel inside
 // a project export. Same path rules as the project file.
 // (Re-added 2026-08-10 while rebuilding after the source loss.)
-var retainedPath = builder.Configuration["Config:RetainedPath"] ?? "hino.retain.json";
+var retainedPath = dataPaths.Resolve(builder.Configuration["Config:RetainedPath"], dataPaths.Retained);
 builder.Services.AddSingleton(sp => new RetainedValueStore(
-    System.IO.Path.IsPathRooted(retainedPath)
-        ? retainedPath
-        : System.IO.Path.Combine(AppContext.BaseDirectory, retainedPath),
+    retainedPath,
     sp.GetRequiredService<ILogger<RetainedValueStore>>()));
 builder.Services.AddSingleton<IRetainedValueStore>(sp => sp.GetRequiredService<RetainedValueStore>());
 
@@ -73,6 +118,10 @@ builder.Services.AddSingleton<DeviceEngine>();
 builder.Services.AddSingleton<ProjectValidator>();
 // Alarm evaluation is hooked into the tag stream by EngineHostedService at startup.
 builder.Services.AddSingleton<AlarmEngine>();
+var commandOptions = builder.Configuration.GetSection("Commands").Get<ControlCommandOptions>() ?? new();
+builder.Services.AddSingleton(commandOptions);
+builder.Services.AddSingleton<ControlCommandService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ControlCommandService>());
 
 // Driver factories â€” one registration per driver package. Add S7/IEC104/... here later.
 builder.Services.AddSingleton<IDeviceDriverFactory, SimulatorDriverFactory>();
@@ -92,21 +141,48 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<Iec104HostedServic
 // MQTT keeps its own durable disk spool and can be reapplied without restarting the gateway.
 builder.Services.AddSingleton<MqttHostedService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MqttHostedService>());
+builder.Services.AddHostedService<GatewaySupervisorService>();
 
 var app = builder.Build();
+app.Logger.LogInformation("Gateway data root: {DataRoot}", dataPaths.Root);
+if (GatewayDataPaths.PermissionWarning is { } permissionWarning)
+    app.Logger.LogWarning("{Warning}", permissionWarning);
 
 // Serve the Blazor WebAssembly client that this project references.
 app.UseBlazorFrameworkFiles();
 app.UseStaticFiles();
 
+if (security.Enabled && security.RequireHttps)
+{
+    app.UseHsts();
+    app.Use(async (context, next) =>
+    {
+        if (!context.Request.IsHttps)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("HTTPS is required.");
+            return;
+        }
+        await next(context);
+    });
+}
+
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
+app.UseMiddleware<AuditMiddleware>();
 
 app.MapControllers();
-app.MapHub<TelemetryHub>("/hubs/telemetry");
-app.MapHub<AlarmHub>("/hubs/alarms");
+app.MapHub<TelemetryHub>("/hubs/telemetry").RequireAuthorization(GatewayPolicies.Viewer);
+app.MapHub<AlarmHub>("/hubs/alarms").RequireAuthorization(GatewayPolicies.Viewer);
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{ Predicate = registration => registration.Tags.Contains("live") }).AllowAnonymous();
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{ Predicate = registration => registration.Tags.Contains("ready") }).AllowAnonymous();
 
 // SPA fallback: any unmatched route serves the Blazor host page.
 app.MapFallbackToFile("index.html");
 
 app.Run();
+
+public partial class Program;

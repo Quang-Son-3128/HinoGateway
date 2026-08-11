@@ -29,7 +29,8 @@ public sealed class TagStore : ITagValueSource
     // Synchronous observers, registered once at composition time. Used by consumers that must not
     // miss a single sample (the alarm engine): unlike the queues, nothing here is ever dropped.
     // Observers therefore run on the polling thread and must stay cheap and non-blocking.
-    private readonly List<Action<IReadOnlyList<TagRead>>> _observers = new();
+    private volatile Action<IReadOnlyList<TagRead>>[] _observers = [];
+    private readonly object _observerGate = new();
 
     public TagStore(int updateQueueCapacity = 1024) => _defaultCapacity = Math.Max(8, updateQueueCapacity);
 
@@ -68,8 +69,8 @@ public sealed class TagStore : ITagValueSource
     /// </summary>
     public void AddObserver(Action<IReadOnlyList<TagRead>> observer)
     {
-        lock (_observers)
-            _observers.Add(observer);
+        lock (_observerGate)
+            _observers = _observers.Append(observer).ToArray();
     }
 
     /// <summary>

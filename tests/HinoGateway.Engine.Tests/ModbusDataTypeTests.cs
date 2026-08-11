@@ -139,6 +139,6 @@ public class ModbusDataTypeTests
             Tags = [new TagDefinition { Id = "A/Flag", Name = "Flag", Address = "HR:10.3", DataType = DataType.Int16 }],
         };
 
-        Assert.Contains(new ModbusTcpDriverFactory().Validate(config), p => p.Contains("Bool"));
+        Assert.Contains(new ModbusTcpDriverFactory().ValidateTags(config).Values, p => p.Contains("Bool"));
     }
 }

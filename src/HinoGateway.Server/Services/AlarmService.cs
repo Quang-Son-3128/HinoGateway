@@ -22,24 +22,46 @@ public sealed class AlarmService : BackgroundService
     private readonly IAlarmJournal _journal;
     private readonly IHubContext<AlarmHub> _hub;
     private readonly ILogger<AlarmService> _logger;
+    private readonly ComponentHealthRegistry _health;
 
     public AlarmService(AlarmEngine alarms, IAlarmJournal journal, IHubContext<AlarmHub> hub,
+        ComponentHealthRegistry health,
         ILogger<AlarmService> logger)
     {
         _alarms = alarms;
         _journal = journal;
         _hub = hub;
         _logger = logger;
+        _health = health;
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken) => JournalLoopAsync(stoppingToken);
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                _health.Running("alarm-journal");
+                await JournalLoopAsync(stoppingToken);
+                if (!stoppingToken.IsCancellationRequested)
+                    throw new InvalidOperationException("Alarm journal loop returned unexpectedly.");
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+            catch (Exception ex)
+            {
+                _health.Failed("alarm-journal", ex);
+                _logger.LogError(ex, "Alarm journal loop stopped; restarting");
+                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+            }
+        }
+    }
 
     private async Task JournalLoopAsync(CancellationToken ct)
     {
         var batch = new List<AlarmEvent>(MaxBatch);
         try
         {
-            while (await _alarms.Events.WaitToReadAsync(ct))
+            while (await WaitForAlarmAsync(ct))
             {
                 // Coalesce a burst (an alarm storm on one scan) into a single write + push.
                 await Task.Delay(CoalesceWindow, ct);
@@ -50,7 +72,8 @@ public sealed class AlarmService : BackgroundService
                 if (batch.Count == 0)
                     continue;
 
-                await RecordAsync(batch, ct);
+                if (await RecordAsync(batch, ct))
+                    _health.Heartbeat("alarm-journal");
 
                 try
                 {
@@ -70,19 +93,38 @@ public sealed class AlarmService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Alarm journal loop stopped unexpectedly");
+            throw;
         }
     }
 
-    private async Task RecordAsync(List<AlarmEvent> batch, CancellationToken ct)
+    private async Task<bool> RecordAsync(List<AlarmEvent> batch, CancellationToken ct)
     {
         try
         {
             await _journal.AppendAsync(batch, ct);
+            return true;
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             // Losing a trail entry must not stop alarm processing; the live state is unaffected.
+            _health.Failed("alarm-journal", ex);
             _logger.LogError(ex, "Failed to record {Count} alarm event(s)", batch.Count);
+            return false;
         }
+    }
+
+    private async Task<bool> WaitForAlarmAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            using var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            heartbeat.CancelAfter(TimeSpan.FromSeconds(5));
+            try { return await _alarms.Events.WaitToReadAsync(heartbeat.Token); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                _health.Heartbeat("alarm-journal");
+            }
+        }
+        return false;
     }
 }

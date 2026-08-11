@@ -37,6 +37,7 @@ public class InternalTagEngineTests
         InitialValue = initial,
         Retentive = retentive,
         DataType = type,
+        AllowWrite = true,
     };
 
     private static InternalTagEngine Engine(TagStore store, IRetainedValueStore? retained = null) =>

@@ -7,7 +7,7 @@ using S7DataType = S7.Net.DataType;
 namespace HinoGateway.Drivers.SiemensS7;
 
 /// <summary>S7 ISO-on-TCP driver for S7-300/400/1200/1500 via S7netplus.</summary>
-public sealed class SiemensS7Driver : IDeviceDriver, IDriverDiagnostics
+public sealed class SiemensS7Driver : IDeviceDriver, IDriverDiagnostics, ITransportFaultClassifier
 {
     private readonly DeviceConfig _config;
     private readonly Plc _plc;

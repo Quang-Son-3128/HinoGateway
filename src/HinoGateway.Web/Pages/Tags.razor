@@ -181,6 +181,20 @@
                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:6rem" />
                     <MudTextField T="string" @bind-Value="_tagEdit.Description" Label="Description" Placeholder="What this tag measures"
                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:18rem;flex-grow:1" />
+                    @if (_tagEdit.Kind != TagKind.Expression)
+                    {
+                        <MudTooltip Text="Safety interlock: REST and IEC-104 controls are rejected until this is enabled for this exact tag.">
+                            <MudSwitch T="bool" @bind-Value="_tagEdit.AllowWrite" Color="Color.Warning"
+                                       Label="Allow control/write" Class="mt-2" />
+                        </MudTooltip>
+                        @if (_tagEdit.AllowWrite && _tagEdit.DataType is not DataType.Bool and not DataType.String)
+                        {
+                            <MudNumericField T="double?" @bind-Value="_tagEdit.WriteMin" Label="Write minimum" HideSpinButtons
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:8rem" />
+                            <MudNumericField T="double?" @bind-Value="_tagEdit.WriteMax" Label="Write maximum" HideSpinButtons
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:8rem" />
+                        }
+                    }
                     @* Scaling is applied by the device worker to a raw reading, so it exists only for a
                        device tag: a formula does its own arithmetic and a memory tag holds what was written. *@
                     @if (_tagEdit.Kind == TagKind.Device)
@@ -537,6 +551,7 @@
             Id = t.Id, GroupId = t.GroupId, DeviceId = t.DeviceId, Kind = t.Kind, Name = t.Name,
             Address = t.Address, DataType = t.DataType, Unit = t.Unit, Description = t.Description,
             Scale = t.Scale, Offset = t.Offset, Monotonic = t.Monotonic,
+            AllowWrite = t.AllowWrite, WriteMin = t.WriteMin, WriteMax = t.WriteMax,
             ScanIntervalMs = t.ScanIntervalMs,
             Expression = t.Expression, InitialValue = t.InitialValue,
             Retentive = t.Retentive, EvalMode = t.EvalMode,

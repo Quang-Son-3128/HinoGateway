@@ -59,9 +59,13 @@ public class Iec104ServerTests : IAsyncDisposable
             Points = points.ToList(),
         };
 
-        _server = new Iec104Server(options, _tags,
-            (tag, value, _) => { lock (_writes) _writes.Add((tag, value)); return Task.CompletedTask; },
-            NullLogger<Iec104Server>.Instance);
+        return await StartServerAsync(options,
+            (tag, value, _) => { lock (_writes) _writes.Add((tag, value)); return Task.CompletedTask; });
+    }
+
+    private async Task<List<ASDU>> StartServerAsync(Iec104ServerOptions options, Iec104TagWriter writer)
+    {
+        _server = new Iec104Server(options, _tags, writer, NullLogger<Iec104Server>.Instance);
         _server.Start();
 
         var received = new List<ASDU>();
@@ -263,6 +267,30 @@ public class Iec104ServerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Select_before_operate_binds_connection_type_and_value()
+    {
+        var point = Point(301, "Plant/Limit", Iec104PointType.ShortFloat, Iec104CommandType.SetpointShort);
+        point.RequireSelect = true;
+        var received = await StartAsync(point);
+        await ActivateAsync();
+
+        _client!.SendControlCommand(CauseOfTransmission.ACTIVATION, CommonAddress,
+            new SetpointCommandShort(301, 62.5f, new SetpointCommandQualifier(false, 0)));
+        await WaitFor(() => Snapshot(received).Any(a => a.Cot == CauseOfTransmission.ACTIVATION_CON && a.IsNegative),
+            "direct operate to be refused");
+        lock (_writes) Assert.Empty(_writes);
+        lock (received) received.Clear();
+
+        _client.SendControlCommand(CauseOfTransmission.ACTIVATION, CommonAddress,
+            new SetpointCommandShort(301, 62.5f, new SetpointCommandQualifier(true, 0)));
+        await WaitFor(() => Snapshot(received).Any(a => a.Cot == CauseOfTransmission.ACTIVATION_CON && !a.IsNegative),
+            "select confirmation");
+        _client.SendControlCommand(CauseOfTransmission.ACTIVATION, CommonAddress,
+            new SetpointCommandShort(301, 62.5f, new SetpointCommandQualifier(false, 0)));
+        await WaitFor(() => { lock (_writes) return _writes.Count == 1; }, "selected command execution");
+    }
+
+    [Fact]
     public async Task A_single_command_writes_a_boolean()
     {
         Publish("Plant/Breaker", false);
@@ -274,6 +302,63 @@ public class Iec104ServerTests : IAsyncDisposable
 
         await WaitFor(() => { lock (_writes) return _writes.Count > 0; }, "the command to reach the tag");
         Assert.Equal(("Plant/Breaker", (object)true), _writes.Single());
+    }
+
+    [Fact]
+    public async Task A_command_that_exceeds_its_deadline_is_terminated_negatively()
+    {
+        var options = new Iec104ServerOptions
+        {
+            Enabled = true, BindAddress = "127.0.0.1", Port = FreePort(), CommonAddress = CommonAddress,
+            CommandQueueCapacity = 4, CommandTimeoutMs = 100,
+            Points = [Point(300, "Plant/Limit", Iec104PointType.ShortFloat, Iec104CommandType.SetpointShort)],
+        };
+        var received = await StartServerAsync(options,
+            async (_, _, ct) => await Task.Delay(Timeout.InfiniteTimeSpan, ct));
+        await ActivateAsync();
+
+        _client!.SendControlCommand(CauseOfTransmission.ACTIVATION, CommonAddress,
+            new SetpointCommandShort(300, 10f, new SetpointCommandQualifier(false, 0)));
+
+        await WaitFor(() => Snapshot(received).Any(a =>
+                a.Cot == CauseOfTransmission.ACTIVATION_TERMINATION && a.IsNegative),
+            "a negative command termination");
+        Assert.Equal(1, _server!.Status.CommandTimeouts);
+        Assert.Equal(1, _server.Status.CommandsRejected);
+    }
+
+    [Fact]
+    public async Task A_full_command_queue_refuses_new_work_instead_of_creating_more_tasks()
+    {
+        var writerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new Iec104ServerOptions
+        {
+            Enabled = true, BindAddress = "127.0.0.1", Port = FreePort(), CommonAddress = CommonAddress,
+            CommandQueueCapacity = 1, CommandTimeoutMs = 5000,
+            Points = [Point(300, "Plant/Limit", Iec104PointType.ShortFloat, Iec104CommandType.SetpointShort)],
+        };
+        var received = await StartServerAsync(options, async (_, _, ct) =>
+        {
+            writerStarted.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+        });
+        await ActivateAsync();
+
+        _client!.SendControlCommand(CauseOfTransmission.ACTIVATION, CommonAddress,
+            new SetpointCommandShort(300, 1f, new SetpointCommandQualifier(false, 0)));
+        await writerStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        _client.SendControlCommand(CauseOfTransmission.ACTIVATION, CommonAddress,
+            new SetpointCommandShort(300, 2f, new SetpointCommandQualifier(false, 0)));
+        await WaitFor(() => _server!.Status.PendingCommands == 1, "one queued command");
+        _client.SendControlCommand(CauseOfTransmission.ACTIVATION, CommonAddress,
+            new SetpointCommandShort(300, 3f, new SetpointCommandQualifier(false, 0)));
+
+        await WaitFor(() => Snapshot(received).Any(a =>
+                a.Cot == CauseOfTransmission.ACTIVATION_CON && a.IsNegative),
+            "the overflowing command to be refused");
+        Assert.Equal(1, _server!.Status.CommandCapacity);
+        Assert.Equal(1, _server.Status.PendingCommands);
+        Assert.True(_server.Status.CommandsRejected >= 1);
     }
 
     [Fact]

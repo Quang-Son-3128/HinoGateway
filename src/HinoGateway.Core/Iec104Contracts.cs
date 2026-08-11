@@ -75,6 +75,7 @@ public sealed class Iec104PointDto
     public bool WithTimestamp { get; set; } = true;
 
     public Iec104CommandType Command { get; set; } = Iec104CommandType.None;
+    public bool RequireSelect { get; set; }
 
     /// <summary>
     /// For scaled/normalised types: engineering value = raw × this. Lets a 0–100 % measurand be
@@ -107,6 +108,13 @@ public sealed class Iec104ServerOptions
 
     /// <summary>How many control centres may be connected at once (redundant links are normal).</summary>
     public int MaxConnections { get; set; } = 4;
+    /// <summary>
+    /// Permitted control-centre IPs/CIDRs. Loopback-only by default; use 0.0.0.0/0 and ::/0 only
+    /// when a firewall provides the source restriction. An empty list denies every connection.
+    /// </summary>
+    public List<string> AllowedClients { get; set; } = ["127.0.0.1/32", "::1/128"];
+    public int OutboundQueueCapacity { get; set; } = 4096;
+    public int MaxSpontaneousPerSecond { get; set; } = 500;
 
     /// <summary>When false, every command is answered with a negative confirmation.</summary>
     public bool AllowCommands { get; set; } = true;
@@ -195,7 +203,22 @@ public sealed record Iec104Status(
     string? LastError,
     // Something is wrong with the environment even though the station started — most importantly,
     // another program already serving this port.
-    string? Warning);
+    string? Warning)
+{
+    /// <summary>Commands accepted by ACT_CON and still waiting for the device dispatcher.</summary>
+    public int PendingCommands { get; init; }
+
+    /// <summary>Configured upper bound for pending commands.</summary>
+    public int CommandCapacity { get; init; }
+
+    /// <summary>Commands terminated negatively because their end-to-end deadline expired.</summary>
+    public long CommandTimeouts { get; init; }
+    public int PendingOutbound { get; init; }
+    public long CoalescedUpdates { get; init; }
+    /// <summary>Points rejected because a gateway/lib60870 queue was at capacity or unrepresentable.</summary>
+    public long CapacityDrops { get; init; }
+    public long LoopRestarts { get; init; }
+}
 
 /// <summary>
 /// A control centre currently holding one or more connections open.

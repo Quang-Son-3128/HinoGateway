@@ -65,14 +65,14 @@
     <div class="kpi @(_status.CommandsRejected > 0 ? "kpi-bad" : "kpi-neutral")">
         <div class="kpi-label">Commands</div>
         <div class="kpi-value">@_status.CommandsAccepted<span style="opacity:.45;font-size:.7em"> ok</span></div>
-        <div class="kpi-sub">@_status.CommandsRejected refused</div>
+        <div class="kpi-sub">@_status.CommandsRejected refused; @_status.PendingCommands/@_status.CommandCapacity queued; @_status.CommandTimeouts timeout</div>
     </div>
-    @if (_status.DroppedUpdates > 0)
+    @if (_status.DroppedUpdates + _status.CapacityDrops > 0)
     {
         <div class="kpi kpi-bad">
             <div class="kpi-label">Dropped updates</div>
-            <div class="kpi-value">@_status.DroppedUpdates</div>
-            <div class="kpi-sub">link cannot keep up</div>
+            <div class="kpi-value">@(_status.DroppedUpdates + _status.CapacityDrops)</div>
+            <div class="kpi-sub">@_status.DroppedUpdates source batches · @_status.CapacityDrops outbound points</div>
         </div>
     }
 </div>
@@ -110,6 +110,14 @@
         <MudItem xs="12" md="3" Class="d-flex align-center" style="gap:1rem">
             <MudSwitch @bind-Value="_options.AllowCommands" Color="Color.Primary" Label="Accept commands" />
         </MudItem>
+        <MudItem xs="6" md="3">
+            <MudNumericField @bind-Value="_options.CommandQueueCapacity" Label="Command queue" Min="1" Max="10000"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="refuse overflow immediately" />
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudNumericField @bind-Value="_options.CommandTimeoutMs" Label="Command timeout (ms)" Min="100" Max="600000"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="includes time waiting in queue" />
+        </MudItem>
         <MudItem xs="12" md="3" Class="d-flex align-center" style="gap:1rem">
             <MudSwitch @bind-Value="_options.AllowClockSync" Color="Color.Primary" Label="Accept clock sync" />
         </MudItem>
@@ -121,6 +129,19 @@
         <MudItem xs="6" md="3">
             <MudNumericField @bind-Value="_options.PeriodicIntervalSeconds" Label="Periodic transmission (s)" Min="0"
                              Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="0 = report by exception" />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudTextField @bind-Value="_allowedClients" Label="Allowed control centres"
+                          Variant="Variant.Outlined" Margin="Margin.Dense"
+                          HelperText="IP/CIDR separated by comma; empty denies all; use 0.0.0.0/0 explicitly for any IPv4" />
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudNumericField @bind-Value="_options.MaxSpontaneousPerSecond" Label="Spontaneous / second" Min="1" Max="100000"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudNumericField @bind-Value="_options.OutboundQueueCapacity" Label="Outbound state capacity" Min="64" Max="100000"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" />
         </MudItem>
     </MudGrid>
 
@@ -159,7 +180,7 @@
             <MudText Typo="Typo.subtitle1">No points mapped</MudText>
             <MudText Typo="Typo.caption" Style="opacity:.6">
                 Add them here, or import the utility's signal list as CSV
-                (<span class="mono">TagPath,Ioa,Type,Deadband,WithTimestamp,Command,ReportScale</span>).
+                (<span class="mono">TagPath,Ioa,Type,Deadband,WithTimestamp,Command,ReportScale,RequireSelect</span>).
                 Type and Command accept the utility's numbers — <span class="mono">T13</span>,
                 <span class="mono">T50</span> — as well as <span class="mono">M_ME_NC_1</span> style names.
             </MudText>
@@ -177,6 +198,7 @@
                 <MudTh Style="width:8rem">Scale</MudTh>
                 <MudTh Style="width:6rem">Time tag</MudTh>
                 <MudTh Style="width:12rem">Command</MudTh>
+                <MudTh Style="width:6rem">SBO</MudTh>
                 <MudTh Style="width:3rem"></MudTh>
             </HeaderContent>
             <RowTemplate>
@@ -221,13 +243,17 @@
                     </div>
                 </MudTd>
                 <MudTd DataLabel="Command">
-                    <MudSelect T="Iec104CommandType" Value="context.Command" ValueChanged="@(v => context.Command = v)"
+                    <MudSelect T="Iec104CommandType" Value="context.Command" ValueChanged="@(v => CommandChanged(context, v))"
                                Dense Variant="Variant.Text" Margin="Margin.Dense" Class="mono">
                         @foreach (var c in Enum.GetValues<Iec104CommandType>())
                         {
                             <MudSelectItem Value="c">@Iec104TypeIds.Label(c)</MudSelectItem>
                         }
                     </MudSelect>
+                </MudTd>
+                <MudTd DataLabel="SBO">
+                    <MudSwitch T="bool" Value="context.RequireSelect" ValueChanged="@(v => context.RequireSelect = v)"
+                               Disabled="@(context.Command == Iec104CommandType.None)" Color="Color.Warning" Size="Size.Small" />
                 </MudTd>
                 <MudTd>
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
@@ -244,6 +270,16 @@
     private List<TagDto> _tags = new();
     private System.Threading.Timer? _statusTimer;
     private bool _busy;
+    private string _allowedClients = "";
+
+    private static void CommandChanged(Iec104PointDto point, Iec104CommandType command)
+    {
+        point.Command = command;
+        if (command is Iec104CommandType.SingleCommand or Iec104CommandType.DoubleCommand)
+            point.RequireSelect = true;
+        else if (command == Iec104CommandType.None)
+            point.RequireSelect = false;
+    }
 
     private static readonly Iec104Status Empty = new(false, false, "-", 0, 0, 0,
         Array.Empty<Iec104ConnectionInfo>(), 0, 0, null, null, 0, 0, 0, 0, 0, null, null, null);
@@ -260,6 +296,7 @@
         {
             _tags = await Http.GetFromJsonAsync<List<TagDto>>("api/config/tags") ?? new();
             _options = await Http.GetFromJsonAsync<Iec104ServerOptions>("api/iec104") ?? new();
+            _allowedClients = string.Join(", ", _options.AllowedClients);
         }
         catch (Exception ex)
         {
@@ -305,6 +342,7 @@
         _busy = true;
         try
         {
+            _options.AllowedClients = _allowedClients.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
             var resp = await Http.PutAsJsonAsync("api/iec104", _options);
             if (resp.IsSuccessStatusCode)
             {

@@ -145,6 +145,9 @@ public sealed class TagDto
     public string? Description { get; set; }
     public double Scale { get; set; } = 1.0;
     public double Offset { get; set; } = 0.0;
+    public bool AllowWrite { get; set; }
+    public double? WriteMin { get; set; }
+    public double? WriteMax { get; set; }
 
     /// <summary>
     /// Cumulative counter: a read lower than the highest accepted so far is refused and the previous

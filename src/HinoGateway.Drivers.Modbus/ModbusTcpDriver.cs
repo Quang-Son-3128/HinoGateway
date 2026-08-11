@@ -26,7 +26,7 @@ namespace HinoGateway.Drivers.Modbus;
 /// <c>MaxRegisterGap</c> (8), <c>MaxBitGap</c> (64), <c>PollDeadlineMs</c> (5000),
 /// <c>QuarantineMs</c> (60000).
 /// </summary>
-public sealed class ModbusTcpDriver : IDeviceDriver, IDriverDiagnostics
+public sealed class ModbusTcpDriver : IDeviceDriver, IDriverDiagnostics, ITransportFaultClassifier
 {
     private readonly DeviceConfig _config;
     private readonly string _host;
@@ -44,7 +44,7 @@ public sealed class ModbusTcpDriver : IDeviceDriver, IDriverDiagnostics
     private readonly List<ModbusPoint> _points;
     private readonly Dictionary<string, ModbusPoint> _pointsByTag;
 
-    private List<ModbusReadBlock> _blocks;
+    private ModbusReadBlock[] _blocks;
     private TcpClient? _tcp;
     private IModbusMaster? _master;
 
@@ -68,7 +68,7 @@ public sealed class ModbusTcpDriver : IDeviceDriver, IDriverDiagnostics
                 ModbusAddress.RegisterCount(tag.DataType)))
             .ToList();
         _pointsByTag = _points.ToDictionary(p => p.Tag.Id);
-        _blocks = ModbusReadPlan.Build(_points, _maxRegisterGap, _maxBitGap);
+        _blocks = ModbusReadPlan.Build(_points, _maxRegisterGap, _maxBitGap).ToArray();
     }
 
     private string Get(string key, string dflt) =>
@@ -82,7 +82,7 @@ public sealed class ModbusTcpDriver : IDeviceDriver, IDriverDiagnostics
         get
         {
             var now = DateTimeOffset.UtcNow;
-            return _blocks.Select(b => b.ToStat(now)).ToList();
+            return Volatile.Read(ref _blocks).Select(b => b.ToStat(now)).ToList();
         }
     }
 
@@ -98,7 +98,7 @@ public sealed class ModbusTcpDriver : IDeviceDriver, IDriverDiagnostics
         _master.Transport.Retries = _retries;
 
         // Fresh connection, fresh plan: forget every split and quarantine learned from the old one.
-        _blocks = ModbusReadPlan.Build(_points, _maxRegisterGap, _maxBitGap);
+        Volatile.Write(ref _blocks, ModbusReadPlan.Build(_points, _maxRegisterGap, _maxBitGap).ToArray());
     }
 
     public async Task<IReadOnlyList<TagRead>> PollAsync(CancellationToken ct)
@@ -110,15 +110,22 @@ public sealed class ModbusTcpDriver : IDeviceDriver, IDriverDiagnostics
         var registers = new Dictionary<ushort, ushort>();
         var bits = new Dictionary<ushort, bool>();
         var failures = new Dictionary<string, string>(StringComparer.Ordinal);
+        var notDue = new HashSet<string>(StringComparer.Ordinal);
 
         var budget = Stopwatch.StartNew();
-        var queue = new Queue<ModbusReadBlock>(_blocks);
+        var queue = new Queue<ModbusReadBlock>(Volatile.Read(ref _blocks));
 
         while (queue.Count > 0)
         {
             ct.ThrowIfCancellationRequested();
             var block = queue.Dequeue();
 
+            if (!block.IsDue(now))
+            {
+                foreach (var point in block.Points)
+                    notDue.Add(point.Tag.Id);
+                continue;
+            }
             if (block.IsQuarantined(now))
             {
                 Fail(block, block.LastError ?? "Address refused by the device; retrying later.");
@@ -154,6 +161,7 @@ public sealed class ModbusTcpDriver : IDeviceDriver, IDriverDiagnostics
                 }
 
                 block.RecordSuccess((budget.Elapsed - started).TotalMilliseconds);
+                block.MarkPolled(now);
             }
             catch (SlaveException ex)
             {
@@ -183,6 +191,8 @@ public sealed class ModbusTcpDriver : IDeviceDriver, IDriverDiagnostics
         var reads = new List<TagRead>(_points.Count);
         foreach (var point in _points)
         {
+            if (notDue.Contains(point.Tag.Id))
+                continue;
             if (failures.TryGetValue(point.Tag.Id, out var failure))
             {
                 reads.Add(new TagRead(point.Tag.Id, TagValue.Bad(failure, now)));
@@ -230,11 +240,15 @@ public sealed class ModbusTcpDriver : IDeviceDriver, IDriverDiagnostics
     /// <summary>Swap a refused block for its halves, keeping the plan's order stable.</summary>
     private void ReplaceBlock(ModbusReadBlock block, List<ModbusReadBlock> halves)
     {
-        var index = _blocks.IndexOf(block);
+        var current = Volatile.Read(ref _blocks);
+        var index = Array.IndexOf(current, block);
         if (index < 0)
             return;
-        _blocks.RemoveAt(index);
-        _blocks.InsertRange(index, halves);
+        var replacement = new ModbusReadBlock[current.Length - 1 + halves.Count];
+        Array.Copy(current, 0, replacement, 0, index);
+        halves.CopyTo(replacement, index);
+        Array.Copy(current, index + 1, replacement, index + halves.Count, current.Length - index - 1);
+        Volatile.Write(ref _blocks, replacement);
     }
 
     public async Task WriteAsync(string tagId, object value, CancellationToken ct)
@@ -256,23 +270,37 @@ public sealed class ModbusTcpDriver : IDeviceDriver, IDriverDiagnostics
         if (pt.Addr.Type is not (ModbusRegisterType.Coil or ModbusRegisterType.HoldingRegister))
             throw new NotSupportedException($"Tag '{tagId}' maps to a read-only Modbus area ({pt.Addr.Type}).");
 
-        if (_master is null)
+        if (_master is null || _tcp is null)
             throw new InvalidOperationException("Modbus master not connected.");
 
-        switch (pt.Addr.Type)
+        ct.ThrowIfCancellationRequested();
+        // NModbus 3.x does not expose cancellation tokens for writes. Closing the socket is the
+        // only reliable way to stop an in-flight command at its caller's deadline; the next poll
+        // then observes the broken transport and lets DeviceWorker reconnect it.
+        using var cancellation = ct.Register(static state => ((TcpClient)state!).Dispose(), _tcp);
+        try
         {
-            case ModbusRegisterType.Coil:
-                await _master.WriteSingleCoilAsync(_unitId, pt.Addr.Address, ModbusCodec.ToBool(value));
-                break;
-            case ModbusRegisterType.HoldingRegister:
-                var regs = ModbusCodec.EncodeRegisters(pt.Tag.DataType, value, _wordSwap, _byteSwap);
-                if (regs.Length == 1)
-                    await _master.WriteSingleRegisterAsync(_unitId, pt.Addr.Address, regs[0]);
-                else
-                    await _master.WriteMultipleRegistersAsync(_unitId, pt.Addr.Address, regs);
-                break;
+            switch (pt.Addr.Type)
+            {
+                case ModbusRegisterType.Coil:
+                    await _master.WriteSingleCoilAsync(_unitId, pt.Addr.Address, ModbusCodec.ToBool(value));
+                    break;
+                case ModbusRegisterType.HoldingRegister:
+                    var regs = ModbusCodec.EncodeRegisters(pt.Tag.DataType, value, _wordSwap, _byteSwap);
+                    if (regs.Length == 1)
+                        await _master.WriteSingleRegisterAsync(_unitId, pt.Addr.Address, regs[0]);
+                    else
+                        await _master.WriteMultipleRegistersAsync(_unitId, pt.Addr.Address, regs);
+                    break;
+            }
+        }
+        catch (Exception ex) when (ct.IsCancellationRequested)
+        {
+            throw new OperationCanceledException("Modbus write was cancelled; the connection was closed.", ex, ct);
         }
     }
+
+    public bool IsTransportFault(Exception exception) => TransportFaults.IsConnectionGone(exception);
 
     public Task DisconnectAsync(CancellationToken ct)
     {

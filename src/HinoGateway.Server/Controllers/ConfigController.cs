@@ -2,6 +2,9 @@ using System.Text;
 using System.Text.Json;
 using HinoGateway.Core;
 using HinoGateway.Engine;
+using HinoGateway.Server.Security;
+using HinoGateway.Storage;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace HinoGateway.Server.Controllers;
@@ -13,11 +16,19 @@ namespace HinoGateway.Server.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/config")]
+[Authorize(Policy = GatewayPolicies.Admin)]
 public sealed class ConfigController : ControllerBase
 {
     private readonly IConfigStore _store;
+    private readonly ISecretStore _secrets;
+    private readonly ProjectValidator _validator;
 
-    public ConfigController(IConfigStore store) => _store = store;
+    public ConfigController(IConfigStore store, ISecretStore secrets, ProjectValidator validator)
+    {
+        _store = store;
+        _secrets = secrets;
+        _validator = validator;
+    }
 
     /// <summary>Driver types available for the connection editor's dropdown.</summary>
     [HttpGet("drivers")]
@@ -47,11 +58,17 @@ public sealed class ConfigController : ControllerBase
         if (string.IsNullOrWhiteSpace(dto.Id) || dto.Id.Trim() != id)
             return BadRequest("Device id in body must match the URL.");
 
-        var known = factories.Select(f => f.DriverType).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!known.Contains(dto.Driver))
+        var factory = factories.FirstOrDefault(f => string.Equals(f.DriverType, dto.Driver,
+            StringComparison.OrdinalIgnoreCase));
+        if (factory is null)
+        {
+            var known = factories.Select(f => f.DriverType).ToList();
             return BadRequest($"Unknown driver '{dto.Driver}'. Available: {string.Join(", ", known)}.");
+        }
 
-        await _store.UpsertDeviceAsync(ConfigMapping.ToConfig(dto), ct);
+        var protectedDevice = SecretConfiguration.ProtectDevice(
+            ConfigMapping.ToConfig(dto), factory, _secrets, clearEmpty: true, out _);
+        await _store.UpsertDeviceAsync(protectedDevice, ct);
         return NoContent();
     }
 
@@ -65,6 +82,12 @@ public sealed class ConfigController : ControllerBase
             return Conflict($"Connection '{id}' is still used by {inUse} tag(s). Reassign or delete those tags first.");
 
         var removed = await _store.DeleteDeviceAsync(id, ct);
+        if (removed)
+        {
+            var prefix = $"device.{id}.";
+            foreach (var name in _secrets.Names.Where(n => n.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList())
+                _secrets.Delete(name);
+        }
         return removed ? NoContent() : NotFound();
     }
 
@@ -243,6 +266,10 @@ public sealed class ConfigController : ControllerBase
         [FromServices] AlarmEngine alarmEngine, [FromServices] IAlarmStore alarms,
         [FromServices] ILogger<ConfigController> logger, CancellationToken ct)
     {
+        var problems = await _validator.ValidateStoredAsync(_store, alarms, ct);
+        if (problems.Count > 0)
+            return BadRequest(new { Message = "Stored project is invalid; runtime was left unchanged.", Errors = problems });
+
         var devices = await _store.GetDevicesAsync(ct);
         var applied = await engine.ReloadAsync(devices, await _store.GetInternalTagsAsync(ct));
         alarmEngine.Reload(AlarmMapping.ToDefinitions(
@@ -264,6 +291,8 @@ public sealed class ConfigController : ControllerBase
             Groups = (await _store.GetGroupsAsync(ct)).ToList(),
             Tags = (await _store.GetTagsAsync(ct)).ToList(),
             Alarms = (await alarms.GetAlarmsAsync(ct)).ToList(),
+            Iec104 = await _store.GetIec104Async(ct),
+            Mqtt = await _store.GetMqttAsync(ct),
         };
 
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(project, ExportJson));
@@ -279,12 +308,20 @@ public sealed class ConfigController : ControllerBase
     /// </summary>
     [HttpPost("import")]
     public async Task<ActionResult<ImportResult>> Import([FromBody] HinoProject project, [FromQuery] bool replace,
-        [FromServices] IAlarmStore alarms, CancellationToken ct)
+        [FromServices] IAlarmStore alarms, [FromServices] IEnumerable<IDeviceDriverFactory> factories,
+        CancellationToken ct)
     {
         if (!string.Equals(project.Format, HinoProject.FormatTag, StringComparison.OrdinalIgnoreCase))
             return BadRequest($"Not a HinoGateway project file (format = '{project.Format}').");
         if (project.Version > HinoProject.CurrentVersion)
             return BadRequest($"Project version {project.Version} is newer than this server supports ({HinoProject.CurrentVersion}).");
+
+        JsonProjectStore.Normalise(project);
+        if (replace)
+        {
+            project.Iec104 ??= new Iec104ServerOptions();
+            project.Mqtt ??= new MqttPublisherOptions();
+        }
 
         if (project.Devices.Any(d => string.IsNullOrWhiteSpace(d.Id)))
             return BadRequest("A device in the file has an empty Id.");
@@ -292,34 +329,12 @@ public sealed class ConfigController : ControllerBase
         // Version 1: tags lived under their device — convert to one folder per device.
         var groups = project.Groups.ToList();
         var tags = project.Tags.ToList();
-        if (project.Version == 1)
-        {
-            foreach (var d in project.Devices)
-            {
-                if (d.Tags.Count == 0)
-                    continue;
-                var group = new TagGroupDto { Id = $"imp-{d.Id}", Name = d.Id };
-                groups.Add(group);
-                tags.AddRange(d.Tags.Select(t => new TagDto
-                {
-                    Id = Guid.NewGuid().ToString("N"),
-                    GroupId = group.Id,
-                    DeviceId = d.Id,
-                    Name = string.IsNullOrWhiteSpace(t.Name) ? t.Id : t.Name,
-                    Address = t.Address,
-                    DataType = t.DataType,
-                    Unit = t.Unit,
-                    Scale = t.Scale,
-                    Offset = t.Offset,
-                }));
-            }
-        }
 
         // Validate references before mutating anything.
         var groupIds = groups.Select(g => g.Id).ToHashSet();
-        groupIds.UnionWith((await _store.GetGroupsAsync(ct)).Select(g => g.Id));
+        if (!replace) groupIds.UnionWith((await _store.GetGroupsAsync(ct)).Select(g => g.Id));
         var deviceIds = project.Devices.Select(d => d.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        deviceIds.UnionWith((await _store.GetDevicesAsync(ct)).Select(d => d.DeviceId));
+        if (!replace) deviceIds.UnionWith((await _store.GetDevicesAsync(ct)).Select(d => d.DeviceId));
 
         foreach (var g in groups)
         {
@@ -353,7 +368,24 @@ public sealed class ConfigController : ControllerBase
                 return BadRequest($"Alarm '{a.Name}' references missing tag '{a.TagId}'.");
         }
 
+        var prospective = await ProspectiveProjectAsync(project, replace, alarms, ct);
+        var projectProblems = _validator.Validate(prospective);
+        if (projectProblems.Count > 0)
+            return BadRequest(new { Message = "Imported project is invalid; nothing was changed.", Errors = projectProblems });
+
         var removed = 0;
+        var factoryMap = factories.ToDictionary(f => f.DriverType, StringComparer.OrdinalIgnoreCase);
+        var importedDevices = new List<DeviceConfig>(project.Devices.Count);
+        foreach (var dto in project.Devices)
+        {
+            var device = ConfigMapping.ToConfig(dto);
+            if (factoryMap.TryGetValue(device.Driver, out var factory))
+                device = SecretConfiguration.ProtectDevice(device, factory, _secrets,
+                    clearEmpty: false, out _);
+            importedDevices.Add(device);
+        }
+        if (project.Mqtt is not null)
+            SecretConfiguration.ProtectMqtt(project.Mqtt, _secrets, clearEmpty: false);
 
         // One transaction around the whole import: all-or-nothing (a failure part-way through cannot
         // leave a half-replaced configuration), and the file is written once at the end instead of
@@ -369,8 +401,8 @@ public sealed class ConfigController : ControllerBase
                 foreach (var d in await _store.GetDevicesAsync(ct)) { await _store.DeleteDeviceAsync(d.DeviceId, ct); removed++; }
             }
 
-            foreach (var d in project.Devices)
-                await _store.UpsertDeviceAsync(ConfigMapping.ToConfig(d), ct);
+            foreach (var d in importedDevices)
+                await _store.UpsertDeviceAsync(d, ct);
 
             // Parents before children so every ParentId reference resolves as rows appear.
             foreach (var g in OrderParentsFirst(groups))
@@ -381,6 +413,11 @@ public sealed class ConfigController : ControllerBase
 
             foreach (var a in project.Alarms)
                 await alarms.UpsertAlarmAsync(a, ct);
+
+            if (project.Iec104 is not null)
+                await _store.SaveIec104Async(project.Iec104, ct);
+            if (project.Mqtt is not null)
+                await _store.SaveMqttAsync(project.Mqtt, ct);
 
             tx.Commit();
         }
@@ -402,6 +439,45 @@ public sealed class ConfigController : ControllerBase
         }
         ordered.AddRange(remaining);
         return ordered;
+    }
+
+    private async Task<HinoProject> ProspectiveProjectAsync(HinoProject imported, bool replace,
+        IAlarmStore alarms, CancellationToken ct)
+    {
+        if (replace)
+            return imported;
+
+        var devices = (await _store.GetDevicesAsync(ct)).Select(ConfigMapping.ToDto).ToList();
+        foreach (var device in devices) device.Tags.Clear();
+        var current = new HinoProject
+        {
+            Devices = devices,
+            Groups = (await _store.GetGroupsAsync(ct)).ToList(),
+            Tags = (await _store.GetTagsAsync(ct)).ToList(),
+            Alarms = (await alarms.GetAlarmsAsync(ct)).ToList(),
+            Iec104 = await _store.GetIec104Async(ct),
+            Mqtt = await _store.GetMqttAsync(ct),
+        };
+        current.Devices = Merge(current.Devices, imported.Devices, x => x.Id, StringComparer.OrdinalIgnoreCase);
+        current.Groups = Merge(current.Groups, imported.Groups, x => x.Id, StringComparer.Ordinal);
+        current.Tags = Merge(current.Tags, imported.Tags, x => x.Id, StringComparer.Ordinal);
+        current.Alarms = Merge(current.Alarms, imported.Alarms, x => x.Id, StringComparer.Ordinal);
+        if (imported.Iec104 is not null) current.Iec104 = imported.Iec104;
+        if (imported.Mqtt is not null) current.Mqtt = imported.Mqtt;
+        return current;
+    }
+
+    private static List<T> Merge<T>(IEnumerable<T> current, IEnumerable<T> incoming,
+        Func<T, string> key, IEqualityComparer<string> comparer)
+    {
+        var result = current.ToList();
+        foreach (var item in incoming)
+        {
+            var index = result.FindIndex(existing => comparer.Equals(key(existing), key(item)));
+            if (index >= 0) result[index] = item;
+            else result.Add(item);
+        }
+        return result;
     }
 
     public sealed record ImportResult(int Devices, int Groups, int Tags, int Alarms, int Removed);

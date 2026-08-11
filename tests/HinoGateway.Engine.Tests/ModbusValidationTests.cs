@@ -63,7 +63,7 @@ public class ModbusValidationTests
     [Fact]
     public void An_unparseable_address_names_the_tag_and_the_address()
     {
-        var problems = Factory.Validate(Device(null, Tag("not-an-address", name: "Broken")));
+        var problems = Factory.ValidateTags(Device(null, Tag("not-an-address", name: "Broken"))).Values.ToList();
 
         var problem = Assert.Single(problems);
         Assert.Contains("Broken", problem);
@@ -73,10 +73,10 @@ public class ModbusValidationTests
     [Fact]
     public void Every_bad_tag_is_reported_not_just_the_first()
     {
-        var problems = Factory.Validate(Device(null,
+        var problems = Factory.ValidateTags(Device(null,
             Tag("40001"),                       // fine
             Tag("nope", name: "First"),
-            Tag("also-nope", name: "Second")));
+            Tag("also-nope", name: "Second"))).Values.ToList();
 
         Assert.Equal(2, problems.Count);
         Assert.Contains(problems, p => p.Contains("First"));
@@ -86,7 +86,7 @@ public class ModbusValidationTests
     [Fact]
     public void String_tags_are_refused_rather_than_silently_decoded_as_a_number()
     {
-        var problems = Factory.Validate(Device(null, Tag("40001", DataType.String, "Label")));
+        var problems = Factory.ValidateTags(Device(null, Tag("40001", DataType.String, "Label"))).Values;
 
         Assert.Contains(problems, p => p.Contains("String"));
     }
@@ -94,7 +94,7 @@ public class ModbusValidationTests
     [Fact]
     public void A_bit_address_must_carry_a_bool()
     {
-        var problems = Factory.Validate(Device(null, Tag("00001", DataType.Int32, "Coil")));
+        var problems = Factory.ValidateTags(Device(null, Tag("00001", DataType.Int32, "Coil"))).Values;
 
         Assert.Contains(problems, p => p.Contains("Bool"));
     }
@@ -102,7 +102,7 @@ public class ModbusValidationTests
     [Fact]
     public void A_multi_register_type_may_not_run_past_the_end_of_the_address_space()
     {
-        var problems = Factory.Validate(Device(null, Tag("HR:65535", DataType.Float64, "Edge")));
+        var problems = Factory.ValidateTags(Device(null, Tag("HR:65535", DataType.Float64, "Edge"))).Values;
 
         Assert.Contains(problems, p => p.Contains("address space"));
     }

@@ -84,22 +84,19 @@ public sealed class JsonSecretStore : ISecretStore
             // connections failing to authenticate and saying so.
             _logger.LogError(ex, "Could not read the secret file {Path}; treating it as empty", _path);
         }
+
+        try { HardenPermissions(_path); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Could not restrict permissions on secret file {Path}", _path); }
     }
 
     private void Save()
     {
-        var temp = _path + ".tmp";
         try
         {
-            var directory = Path.GetDirectoryName(_path);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-
-            File.WriteAllText(temp, JsonSerializer.Serialize(_values, Json));
-            if (File.Exists(_path))
-                File.Replace(temp, _path, destinationBackupFileName: null, ignoreMetadataErrors: true);
-            else
-                File.Move(temp, _path);
+            DurableAtomicFile.WriteAllText(_path, JsonSerializer.Serialize(_values, Json),
+                prepareTemp: HardenPermissions,
+                unixCreateMode: UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            HardenPermissions(_path);
         }
         catch (Exception ex)
         {
@@ -107,12 +104,24 @@ public sealed class JsonSecretStore : ISecretStore
             throw new ConfigurationPersistenceException(_path,
                 $"Could not persist gateway credentials to '{_path}'. The change will not survive a restart.", ex);
         }
-        finally
-        {
-            if (File.Exists(temp))
-            {
-                try { File.Delete(temp); } catch { /* best effort */ }
-            }
-        }
+    }
+
+    private static void HardenPermissions(string path)
+    {
+        if (OperatingSystem.IsWindows()) HardenWindowsAcl(path);
+        else File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static void HardenWindowsAcl(string path)
+    {
+        var identity = System.Security.Principal.WindowsIdentity.GetCurrent().User
+                       ?? throw new InvalidOperationException("The service account has no Windows SID.");
+        var acl = new System.Security.AccessControl.FileSecurity();
+        acl.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        acl.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(identity,
+            System.Security.AccessControl.FileSystemRights.FullControl,
+            System.Security.AccessControl.AccessControlType.Allow));
+        new FileInfo(path).SetAccessControl(acl);
     }
 }

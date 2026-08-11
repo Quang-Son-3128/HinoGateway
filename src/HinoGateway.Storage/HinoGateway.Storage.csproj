@@ -9,6 +9,7 @@
          there is no database engine, no native library per architecture and no schema migration to
          apply in the field. Only Microsoft.Extensions.Logging.Abstractions is needed. -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.*" />
+    <PackageReference Include="System.IO.FileSystem.AccessControl" Version="4.7.0" />
   </ItemGroup>
 
   <PropertyGroup>

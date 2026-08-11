@@ -168,9 +168,17 @@ stack trace.
 Đóng gói và ghi mã băm để biết chắc bản trên IPC đúng là bản đã test:
 
 ```powershell
-Compress-Archive -Path C:\Build\HinoGateway-publish\* -DestinationPath C:\Build\HinoGateway-2026-08-11.zip
-Get-FileHash C:\Build\HinoGateway-2026-08-11.zip -Algorithm SHA256
+$stamp  = Get-Date -Format yyyyMMdd-HHmm
+$commit = (git -C C:\...\HinoGateway rev-parse --short HEAD)
+$zip    = "C:\Build\HinoGateway-$stamp-$commit.zip"
+
+Compress-Archive -Path C:\Build\HinoGateway-publish\* -DestinationPath $zip
+Get-FileHash $zip -Algorithm SHA256 | Format-List
+Write-Host "File cần mang sang IPC: $zip"
 ```
+
+**Ghi lại tên file thật vừa in ra** — các mục sau dùng nó. Tên có dấu thời gian và mã commit nên mỗi
+lần build là một tên khác; đừng gõ lại theo ví dụ trong tài liệu.
 
 ---
 
@@ -213,11 +221,45 @@ Quy ước thư mục (giữ nguyên trên mọi trạm để hỗ trợ từ xa
 Đây là mặc định của phần mềm khi chạy Production trên Windows — không cần cấu hình gì nếu dùng đúng
 hai đường dẫn này.
 
+### 6.1 Chép file zip sang IPC
+
+Bước này phải làm **trước**, bằng USB, ổ mạng, hoặc kéo-thả qua Remote Desktop. Nếu nối được từ máy
+build sang IPC bằng PowerShell Remoting:
+
+```powershell
+# Chạy trên máy build
+$s = New-PSSession -ComputerName <ip-ipc> -Credential (Get-Credential)
+New-Item -ItemType Directory -Force C:\Temp | Out-Null
+Copy-Item $zip -Destination C:\Temp\ -ToSession $s
+Remove-PSSession $s
+```
+
+### 6.2 Bung ra thư mục chương trình
+
 ```powershell
 # Trên IPC, PowerShell nâng quyền (Run as Administrator)
-New-Item -ItemType Directory -Force 'C:\Program Files\HinoGateway'
-Expand-Archive -Path C:\Temp\HinoGateway-2026-08-11.zip -DestinationPath 'C:\Program Files\HinoGateway' -Force
-New-Item -ItemType Directory -Force 'C:\ProgramData\HinoGateway'
+
+# Xác định tên file thật, KHÔNG gõ theo ví dụ trong tài liệu
+$zip = (Get-ChildItem C:\Temp\HinoGateway-*.zip | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+if (-not $zip) { throw "Chưa có file zip trong C:\Temp — quay lại mục 6.1." }
+Write-Host "Sẽ cài đặt từ: $zip"
+
+New-Item -ItemType Directory -Force 'C:\Program Files\HinoGateway' | Out-Null
+Expand-Archive -Path $zip -DestinationPath 'C:\Program Files\HinoGateway' -Force
+New-Item -ItemType Directory -Force 'C:\ProgramData\HinoGateway' | Out-Null
+
+# Kiểm tra ngay: file exe phải nằm TRỰC TIẾP trong thư mục chương trình
+Test-Path 'C:\Program Files\HinoGateway\HinoGateway.Server.exe'   # phải trả về True
+```
+
+Nếu `Test-Path` trả về `False`, gần như chắc chắn zip được nén cả thư mục cha nên nội dung nằm sâu
+thêm một cấp (`...\HinoGateway\HinoGateway-publish\HinoGateway.Server.exe`). Cách nén ở mục 4.4 dùng
+`\*` chính là để tránh chuyện này; nếu đã lỡ, chỉ cần dời nội dung lên một cấp.
+
+**Không dùng zip cũng được** — chép thẳng thư mục publish nếu hai máy nhìn thấy nhau qua mạng:
+
+```powershell
+robocopy '\\<máy-build>\Build\HinoGateway-publish' 'C:\Program Files\HinoGateway' /MIR /R:2 /W:2
 ```
 
 > **Không bao giờ để gateway ghi vào thư mục chương trình.** Tách chương trình và dữ liệu là thứ làm
@@ -543,6 +585,8 @@ Remove-NetFirewallRule -DisplayName 'HinoGateway*'
 
 | Hiện tượng | Nguyên nhân | Cách xử lý |
 | --- | --- | --- |
+| `Expand-Archive : The path '...zip' either does not exist or is not a valid file system path` | File zip chưa được tạo ở mục 4.4, hoặc chưa chép sang IPC, hoặc tên file khác với ví dụ trong tài liệu | `Get-ChildItem C:\Temp\*.zip` để xem thực tế có gì. Dùng đoạn lệnh ở mục 6.2 (tự dò tên file mới nhất) thay vì gõ tên tay. Hai thư mục đã tạo trước đó vẫn dùng lại được, không cần xoá |
+| Bung zip xong nhưng không thấy `HinoGateway.Server.exe` ở gốc thư mục chương trình | Zip được nén kèm thư mục cha | Dời nội dung lên một cấp, hoặc nén lại theo đúng mục 4.4 (`-Path ...\HinoGateway-publish\*`) |
 | Service Start rồi Stop ngay | Cấu hình sai làm ứng dụng ném lỗi khi khởi động | Chạy tay `.\HinoGateway.Server.exe` (mục 8.4) để thấy thông báo lỗi thật; xem thêm `logs\` |
 | `Data:Root must be an absolute path` | Đặt `Data:Root` bằng đường dẫn tương đối | Đổi thành đường dẫn tuyệt đối, ví dụ `D:\HinoGatewayData` |
 | `Security is enabled but no valid Security:ApiKeys` | Bật security mà chưa khai khoá | Khai `Security:ApiKeys` (mục 7.3) |

@@ -42,6 +42,10 @@ Kestrel__Endpoints__Http__Url=http://127.0.0.1:2000
 
 ### Windows service
 
+For a full field runbook — publishing, transferring to an industrial PC, service installation,
+acceptance checklist, upgrade/rollback and troubleshooting — see
+[`HUONG_DAN_TRIEN_KHAI_IPC.md`](HUONG_DAN_TRIEN_KHAI_IPC.md) (Vietnamese). The short version:
+
 Publish to a fixed program directory, keep mutable state in ProgramData, then create the service
 from an elevated PowerShell prompt:
 

@@ -8,6 +8,9 @@ publish/
 # Trang thai luc chay cua gateway - khong bao gio commit
 hino.secrets.json
 hino.retain.json
+hino.db
+hino.db-shm
+hino.db-wal
 logs/
 data/
 *.tmp

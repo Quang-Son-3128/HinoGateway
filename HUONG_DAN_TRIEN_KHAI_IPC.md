@@ -362,6 +362,10 @@ Ba điểm cần nhớ:
 
 Ứng dụng đã tích hợp sẵn `AddWindowsService` (tên service `HinoGateway`) — không cần NSSM hay wrapper.
 
+> Quy trình cài đặt đã được chạy thực tế và tách thành hai tài liệu riêng, dùng chúng khi đi lắp đặt:
+> [`IPC_CAI_DAT_NHANH.md`](IPC_CAI_DAT_NHANH.md) (script dán-và-chạy) và
+> [`IPC_CAI_DAT_CHI_TIET.md`](IPC_CAI_DAT_CHI_TIET.md) (từng bước kèm cách kiểm tra và các chỗ dễ vấp).
+
 ### 8.1 Cách nhanh: chạy dưới `LocalSystem`
 
 ```powershell
@@ -375,23 +379,34 @@ Get-Service HinoGateway
 
 ### 8.2 Cách nên dùng: tài khoản riêng, ít quyền
 
+Tài khoản quy ước là `HinoInstaller`. Xem `IPC_CAI_DAT_CHI_TIET.md` bước 4–6 cho bản đầy đủ; tóm tắt:
+
 ```powershell
-# 1. Tạo tài khoản cục bộ
-$pw = Read-Host -AsSecureString "Mật khẩu cho tài khoản svcHino"
-New-LocalUser -Name svcHino -Password $pw -PasswordNeverExpires -AccountNeverExpires `
-  -Description "HinoGateway service account"
+$acct = 'HinoInstaller'
+$pw   = Read-Host -AsSecureString "Mật khẩu cho tài khoản $acct"
 
-# 2. Cấp FULL CONTROL thư mục dữ liệu (xem ghi chú bên dưới — Modify là chưa đủ)
-icacls 'C:\ProgramData\HinoGateway' /grant 'svcHino:(OI)(CI)F'
+# 1. Tạo tài khoản cục bộ (KHÔNG thêm vào nhóm Administrators)
+New-LocalUser -Name $acct -Password $pw -PasswordNeverExpires -AccountNeverExpires `
+  -UserMayNotChangePassword -Description "HinoGateway service account"
 
-# 3. Thư mục chương trình chỉ cho đọc
-icacls 'C:\Program Files\HinoGateway' /grant 'svcHino:(OI)(CI)RX'
+# 2. Cấp quyền "Log on as a service" — New-Service KHÔNG tự cấp, thiếu là lỗi 1069
+#    (khối secedit đầy đủ nằm ở IPC_CAI_DAT_CHI_TIET.md bước 4b)
 
-# 4. Tạo service với tài khoản đó
+# 3. Cấp FULL CONTROL thư mục dữ liệu (xem ghi chú bên dưới — Modify là chưa đủ)
+icacls 'C:\ProgramData\HinoGateway' /grant "${acct}:(OI)(CI)F"
+
+# 4. Thư mục chương trình chỉ cho đọc
+icacls 'C:\Program Files\HinoGateway' /grant "${acct}:(OI)(CI)RX"
+
+# 5. Tạo service với tài khoản đó
+$cred = New-Object System.Management.Automation.PSCredential("$env:COMPUTERNAME\$acct", $pw)
 New-Service -Name HinoGateway `
   -BinaryPathName '"C:\Program Files\HinoGateway\HinoGateway.Server.exe"' `
-  -StartupType Automatic -Credential (Get-Credential svcHino)
+  -StartupType Automatic -Credential $cred
 Start-Service HinoGateway
+
+# 6. Kiểm tra service THẬT SỰ chạy bằng tài khoản đó
+Get-CimInstance Win32_Service -Filter "Name='HinoGateway'" | Select-Object State, StartName
 ```
 
 > **Vì sao phải Full control chứ không phải Modify:** khi khởi động, gateway ghi lại ACL của thư mục
@@ -399,6 +414,18 @@ Start-Service HinoGateway
 > permissions*, mà "Modify" không bao gồm. Nếu chỉ có Modify, gateway **vẫn chạy** nhưng ghi một dòng
 > WARNING và để nguyên quyền thừa kế. Nó cố tình không tự sát vì lý do này: một gateway chạy được với
 > ACL lỏng còn hơn một gateway không lên được trên máy không có người trực.
+
+> **Ba cái bẫy đã gặp thật khi cài, đều làm mọi thứ trông như đã thành công:**
+>
+> 1. `Get-Credential` **từ chối định dạng `.\tài-khoản`** và bung tooltip "Examples" — trông như báo
+>    sai mật khẩu trong khi mật khẩu chưa hề được kiểm tra. Dựng `PSCredential` bằng lệnh như trên.
+> 2. Nếu service đã tồn tại, `New-Service` báo `The specified service already exists` và **`-Credential`
+>    không được áp dụng** — service vẫn chạy `LocalSystem`, trong khi `sc.exe` phía sau vẫn SUCCESS và
+>    `Get-Service` vẫn `Running`. Vì thế bước 6 ở trên là bắt buộc, không phải tuỳ chọn.
+> 3. Mỗi lần khởi động, gateway ghi lại ACL thành danh sách **đóng**. Nếu nó từng chạy dưới
+>    `LocalSystem`, ACE của tài khoản riêng **đã bị xoá**. Khi chuyển service sang tài khoản riêng,
+>    phải `icacls ... /grant` **lại** trước khi chạy, theo thứ tự: dừng service → cấp quyền →
+>    `sc.exe config obj=` → chạy.
 
 ### 8.3 Bắt Windows tự khởi động lại khi tiến trình chết
 

@@ -92,6 +92,19 @@ builder.Services.AddSingleton(sp => new RetainedValueStore(
     sp.GetRequiredService<ILogger<RetainedValueStore>>()));
 builder.Services.AddSingleton<IRetainedValueStore>(sp => sp.GetRequiredService<RetainedValueStore>());
 
+// --- Local history -----------------------------------------------------------
+// Decision 378/QĐ-EVN requires a site to keep its measurements locally at a resolution of at most
+// five minutes for at least seven days. The same file is what lets an accumulator recover the
+// baseline it was holding when the power went out, so this is a dependency of the energy totals and
+// not merely a compliance box.
+var historyOptions = builder.Configuration.GetSection("History").Get<SampleHistoryOptions>() ?? new();
+builder.Services.AddSingleton(historyOptions);
+builder.Services.AddSingleton<ISampleHistory>(sp => new JsonlSampleHistory(
+    dataPaths.Resolve(historyOptions.Path, dataPaths.History),
+    historyOptions,
+    sp.GetRequiredService<ILogger<JsonlSampleHistory>>()));
+builder.Services.AddHostedService<HistorySamplerService>();
+
 // --- Security ----------------------------------------------------------------
 // Every request gets an identity even when security is switched off, and that identity is Viewer
 // unless the request came from the machine itself. Treating an unauthenticated request as a full

@@ -9,6 +9,7 @@ public sealed record GatewayDataPaths(string Root)
     public string Logs => Path.Combine(Root, "logs");
     public string Audit => Path.Combine(Root, "audit");
     public string Mqtt => Path.Combine(Root, "mqtt");
+    public string History => Path.Combine(Root, "history");
 
     public static GatewayDataPaths Create(IConfiguration configuration, IHostEnvironment environment)
     {

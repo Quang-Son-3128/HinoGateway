@@ -26,10 +26,7 @@ public static class DurableAtomicFile
                 stream.Write(contents);
                 stream.Flush(flushToDisk: true);
             }
-            if (File.Exists(path))
-                File.Replace(temp, path, backupPath, ignoreMetadataErrors: true);
-            else
-                File.Move(temp, path);
+            Publish(temp, path, backupPath);
         }
         finally
         {
@@ -37,9 +34,13 @@ public static class DurableAtomicFile
         }
     }
 
+    public static Task WriteAllTextAsync(string path, string contents, CancellationToken ct = default,
+        string? backupPath = null, Action<string>? prepareTemp = null, UnixFileMode? unixCreateMode = null) =>
+        WriteAllBytesAsync(path, new UTF8Encoding(false).GetBytes(contents), ct, prepareTemp, unixCreateMode, backupPath);
+
     public static async Task WriteAllBytesAsync(string path, ReadOnlyMemory<byte> contents,
         CancellationToken ct = default, Action<string>? prepareTemp = null,
-        UnixFileMode? unixCreateMode = null)
+        UnixFileMode? unixCreateMode = null, string? backupPath = null)
     {
         path = Path.GetFullPath(path);
         var directory = Path.GetDirectoryName(path)
@@ -56,12 +57,27 @@ public static class DurableAtomicFile
                 await stream.FlushAsync(ct).ConfigureAwait(false);
                 stream.Flush(flushToDisk: true);
             }
-            File.Move(temp, path, overwrite: false);
+            // Same publish step as the synchronous overload. It used to be File.Move(overwrite:false),
+            // which threw the moment the destination already existed — so this method could only ever
+            // create a file, never update one, which is the entire point of an atomic write.
+            Publish(temp, path, backupPath);
         }
         finally
         {
             try { if (File.Exists(temp)) File.Delete(temp); } catch { }
         }
+    }
+
+    /// <summary>
+    /// Swap the finished temp file in for the real one in a single filesystem operation, so a reader
+    /// (or a power cut) only ever sees the whole old file or the whole new one.
+    /// </summary>
+    private static void Publish(string temp, string path, string? backupPath)
+    {
+        if (File.Exists(path))
+            File.Replace(temp, path, backupPath, ignoreMetadataErrors: true);
+        else
+            File.Move(temp, path);
     }
 
     private static void CreateProtectedTemp(string path, Action<string>? prepareTemp, UnixFileMode? unixCreateMode)

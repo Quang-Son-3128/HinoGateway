@@ -505,6 +505,13 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
                 existing.Description = tag.Description;
                 existing.Scale = tag.Scale;
                 existing.Offset = tag.Offset;
+                // Command authorisation is part of the tag like everything else. Leaving these three
+                // out meant the first edit of an already-commandable tag silently revoked its write
+                // permission — and made the write limits of the EVN setpoint points unreachable from
+                // the UI, because saving the tag was the very thing that cleared them.
+                existing.AllowWrite = tag.AllowWrite;
+                existing.WriteMin = tag.WriteMin;
+                existing.WriteMax = tag.WriteMax;
                 existing.Monotonic = tag.Monotonic;
                 existing.ScanIntervalMs = tag.ScanIntervalMs;
                 existing.Path = "";

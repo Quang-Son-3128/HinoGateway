@@ -84,6 +84,57 @@ public class JsonProjectStoreTests : IDisposable
         Assert.Contains("\n", json);   // indented, not minified
     }
 
+    /// <summary>
+    /// Editing a tag used to drop its command authorisation, because the update path copied every
+    /// field except the three that decide whether a northbound command may be written at all. The
+    /// symptom in the field was an EVN setpoint that stopped accepting commands the first time
+    /// somebody corrected its description.
+    /// </summary>
+    [Fact]
+    public async Task Editing_a_tag_keeps_its_write_permission_and_limits()
+    {
+        var store = NewStore();
+        await store.UpsertDeviceAsync(Device());
+
+        var tag = Tag("t1", "Setpoint");
+        tag.AllowWrite = true;
+        tag.WriteMin = 0;
+        tag.WriteMax = 100;
+        await store.UpsertTagAsync(tag);
+
+        var edited = Tag("t1", "Setpoint");
+        edited.AllowWrite = true;
+        edited.WriteMin = 0;
+        edited.WriteMax = 100;
+        edited.Description = "P setpoint in percent";
+        await store.UpsertTagAsync(edited);
+
+        var stored = (await NewStore().GetTagsAsync()).Single();
+        Assert.True(stored.AllowWrite);
+        Assert.Equal(0, stored.WriteMin);
+        Assert.Equal(100, stored.WriteMax);
+        Assert.Equal("P setpoint in percent", stored.Description);
+    }
+
+    /// <summary>Revoking it must work too — the fix has to copy the value, not just never clear it.</summary>
+    [Fact]
+    public async Task Revoking_write_permission_on_an_edit_is_persisted()
+    {
+        var store = NewStore();
+        await store.UpsertDeviceAsync(Device());
+
+        var tag = Tag("t1", "Setpoint");
+        tag.AllowWrite = true;
+        tag.WriteMax = 100;
+        await store.UpsertTagAsync(tag);
+
+        await store.UpsertTagAsync(Tag("t1", "Setpoint"));   // AllowWrite defaults to false
+
+        var stored = (await NewStore().GetTagsAsync()).Single();
+        Assert.False(stored.AllowWrite);
+        Assert.Null(stored.WriteMax);
+    }
+
     [Fact]
     public async Task Renaming_a_folder_moves_every_tag_and_alarm_with_it()
     {

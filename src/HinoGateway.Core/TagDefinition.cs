@@ -54,6 +54,46 @@ public sealed record TagDefinition
     /// <summary>When an <see cref="TagKind.Expression"/> tag recomputes. Ignored by other kinds.</summary>
     public EvalMode EvalMode { get; init; } = EvalMode.Scan;
 
+    // --- TagKind.Accumulator ---------------------------------------------------
+
+    /// <summary>
+    /// The <b>runtime path</b> of the cumulative counter an accumulator subtracts from — normally a
+    /// device tag reading an energy register. Null for every other kind.
+    /// </summary>
+    public string? SourceTagId { get; init; }
+
+    /// <summary>
+    /// The same source, by its <b>stable storage key</b>. The durable baselines are filed under this,
+    /// so renaming the counter tag or moving it to another folder does not lose the energy of the day
+    /// in progress. Exactly the split alarms already use (<see cref="AlarmDto.TagId"/> plus
+    /// <see cref="AlarmDto.TagPath"/>).
+    /// </summary>
+    public string? SourceTagKey { get; init; }
+
+    /// <summary>Which calendar period this accumulator reports. Ignored by every other kind.</summary>
+    public AccumulationPeriod Period { get; init; } = AccumulationPeriod.Day;
+
+    /// <summary>
+    /// The engineering value at which the source counter wraps back to zero, or 0 for a counter that
+    /// never wraps. A UInt32 register scaled by 0.01 wraps at <c>42949672.95</c>.
+    ///
+    /// <para>
+    /// It has to be configured rather than inferred, because the difference between a wrap and a
+    /// replaced meter is not visible in the numbers alone — both look like the counter went backwards.
+    /// With this set, a drop that lands within one plausible increment of the wrap point is treated as
+    /// a wrap; anything else is treated as a reset and the baselines are rebased.
+    /// </para>
+    /// </summary>
+    public double RolloverAt { get; init; }
+
+    /// <summary>
+    /// The largest believable rise in the source per hour, in engineering units, or null to accept
+    /// anything. A sample that climbs faster is discarded rather than accepted: a single mis-decoded
+    /// register on an energy counter otherwise inflates the day's total permanently, and the next
+    /// good sample repairs the gap by itself because the answer is a subtraction.
+    /// </summary>
+    public double? MaxRatePerHour { get; init; }
+
     public DataType DataType { get; init; } = DataType.Float64;
 
     /// <summary>Optional engineering unit for display (e.g. "kg", "°C").</summary>
@@ -78,15 +118,23 @@ public sealed record TagDefinition
 
     /// <summary>
     /// The tag is a <b>cumulative counter</b> — an energy meter register, a run-hour counter — whose
-    /// value can only ever rise. A read lower than the highest one accepted so far is refused and the
-    /// previous value is kept, because on such a register a drop is not a smaller measurement: it is
-    /// a bad read (a mis-framed response, the wrong word order, a decode error), and letting it
-    /// through corrupts every consumption figure computed from the difference.
+    /// value can only ever rise. A read lower than the highest one accepted so far is published
+    /// <see cref="Quality.Uncertain"/> with the reason rather than as a measurement, because on such a
+    /// register a drop is not a smaller reading: it is a bad one (a mis-framed response, the wrong
+    /// word order, a decode error), and letting it through as Good corrupts every consumption figure
+    /// computed from the difference.
     ///
-    /// Off by default. When it is on, a genuine drop — the meter is replaced, reset, or its register
-    /// wraps — is <em>also</em> refused and the tag holds its last value until an operator intervenes
-    /// (untick the setting, or restart the gateway, which starts a fresh baseline). That is the
-    /// deliberate trade: never silently accept a false drop, at the cost of noticing a real one.
+    /// <para>
+    /// Off by default. Three consecutive drops <em>are</em> accepted, as the genuine reset they almost
+    /// certainly are — a replaced meter, a reloaded PLC — because refusing forever would leave the tag
+    /// dead until somebody noticed. Three in a row cannot be a transient decode error.
+    /// </para>
+    ///
+    /// <para>
+    /// A <see cref="TagKind.Accumulator"/> does not rely on this flag: it has
+    /// <see cref="RolloverAt"/> and <see cref="MaxRatePerHour"/>, which is enough context to tell a
+    /// wrap from a reset from a spike and to react to each differently.
+    /// </para>
     /// </summary>
     public bool Monotonic { get; init; }
 

@@ -105,6 +105,23 @@ builder.Services.AddSingleton<ISampleHistory>(sp => new JsonlSampleHistory(
     sp.GetRequiredService<ILogger<JsonlSampleHistory>>()));
 builder.Services.AddHostedService<HistorySamplerService>();
 
+// --- Energy accumulation -----------------------------------------------------
+// The baselines are a singleton in their own right and deliberately NOT part of the engine runtime:
+// "Apply to engine" rebuilds that runtime, and a baseline living there would take the day's energy
+// with it every time an operator saved a tag.
+var energyPath = dataPaths.Resolve(builder.Configuration["Energy:StatePath"],
+    Path.Combine(dataPaths.Root, "hino.energy.json"));
+builder.Services.AddSingleton(sp => new AccumulatorStateStore(
+    energyPath, sp.GetRequiredService<ILogger<AccumulatorStateStore>>()));
+builder.Services.AddSingleton<IAccumulatorStateStore>(sp => sp.GetRequiredService<AccumulatorStateStore>());
+
+var journalOptions = builder.Configuration.GetSection("Energy:Journal").Get<EnergyJournalOptions>() ?? new();
+builder.Services.AddSingleton(journalOptions);
+builder.Services.AddSingleton<IEnergyJournal>(sp => new JsonlEnergyJournal(
+    dataPaths.Resolve(builder.Configuration["Energy:JournalPath"], Path.Combine(dataPaths.Root, "energy")),
+    journalOptions,
+    sp.GetRequiredService<ILogger<JsonlEnergyJournal>>()));
+
 // --- Security ----------------------------------------------------------------
 // Every request gets an identity even when security is switched off, and that identity is Viewer
 // unless the request came from the machine itself. Treating an unauthenticated request as a full

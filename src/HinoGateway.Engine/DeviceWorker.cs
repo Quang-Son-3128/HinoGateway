@@ -21,6 +21,12 @@ public sealed class DeviceWorker : IAsyncDisposable
     private readonly SemaphoreSlim _driverLock = new(1, 1);
     private readonly Dictionary<string, TagDefinition> _tagsById;
 
+    /// <summary>
+    /// Highest value accepted so far on each <see cref="TagDefinition.Monotonic"/> tag, and how many
+    /// readings in a row have come in below it. Only ever touched from the poll loop.
+    /// </summary>
+    private readonly Dictionary<string, CounterGuard> _counters;
+
     private readonly TimeSpan _backoffInitial = TimeSpan.FromSeconds(1);
     private readonly TimeSpan _backoffMax = TimeSpan.FromSeconds(30);
 
@@ -35,6 +41,8 @@ public sealed class DeviceWorker : IAsyncDisposable
         _store = store;
         _logger = logger;
         _tagsById = config.Tags.ToDictionary(t => t.Id);
+        _counters = config.Tags.Where(t => t.Monotonic)
+            .ToDictionary(t => t.Id, _ => new CounterGuard(double.NegativeInfinity, 0), StringComparer.Ordinal);
         _health = new DeviceHealth { DeviceId = config.DeviceId };
     }
 
@@ -197,19 +205,89 @@ public sealed class DeviceWorker : IAsyncDisposable
 
     private IReadOnlyList<TagRead> ApplyScaling(IReadOnlyList<TagRead> reads)
     {
-        // Fast path: nothing configured with scaling.
-        if (_tagsById.Values.All(Scaling.IsIdentity))
+        // Fast path: nothing configured with scaling and no counter to guard.
+        if (_counters.Count == 0 && _tagsById.Values.All(Scaling.IsIdentity))
             return reads;
 
         var scaled = new List<TagRead>(reads.Count);
         foreach (var read in reads)
         {
-            scaled.Add(_tagsById.TryGetValue(read.TagId, out var tag)
-                ? new TagRead(read.TagId, Scaling.Apply(tag, read.Value))
-                : read);
+            if (!_tagsById.TryGetValue(read.TagId, out var tag))
+            {
+                scaled.Add(read);
+                continue;
+            }
+            var value = Scaling.Apply(tag, read.Value);
+            if (tag.Monotonic)
+                value = GuardCounter(tag, value);
+            scaled.Add(new TagRead(read.TagId, value));
         }
         return scaled;
     }
+
+    /// <summary>
+    /// Enforce <see cref="TagDefinition.Monotonic"/>.
+    ///
+    /// <para>
+    /// The setting has been offered on the tag editor since the tag database existed, and until now
+    /// nothing anywhere acted on it — an operator could tick "cumulative counter" on an energy
+    /// register and be told nothing was protecting it. On such a register a value below the highest
+    /// one already accepted is not a smaller measurement, it is a bad read: a mis-framed response, the
+    /// wrong word order, a decode error. It is published <see cref="Quality.Uncertain"/> with the
+    /// reason instead of Good, so that everything downstream — alarms, the northbound points, the
+    /// accumulators — can see that this number is not to be built on.
+    /// </para>
+    ///
+    /// <para>
+    /// Three consecutive drops are accepted as a genuine reset instead: a meter really can be replaced
+    /// or a PLC reloaded, and refusing forever would leave the tag dead until somebody noticed. Three
+    /// in a row cannot be a transient decode error, and one poll of hesitation is a cheap price.
+    /// </para>
+    /// </summary>
+    private TagValue GuardCounter(TagDefinition tag, TagValue value)
+    {
+        if (value.Quality != Quality.Good || AsNumber(value.Value) is not { } number)
+            return value;
+
+        // Pre-populated for every monotonic tag at construction, so this cannot miss.
+        var counter = _counters[tag.Id];
+        if (number >= counter.Peak)
+        {
+            _counters[tag.Id] = new CounterGuard(number, 0);
+            return value;
+        }
+
+        if (counter.Drops + 1 >= MonotonicResetAfter)
+        {
+            _logger.LogWarning(
+                "Device {DeviceId}: counter {TagId} read below its peak {Peak} {Count} times in a row; " +
+                "accepting {Value} as a counter reset",
+                _config.DeviceId, tag.Id, counter.Peak, MonotonicResetAfter, number);
+            _counters[tag.Id] = new CounterGuard(number, 0);
+            return value;
+        }
+
+        _counters[tag.Id] = counter with { Drops = counter.Drops + 1 };
+        return value with
+        {
+            Quality = Quality.Uncertain,
+            StatusText = $"cumulative counter read {number}, below the highest accepted value {counter.Peak}",
+        };
+    }
+
+    private static double? AsNumber(object? value) => value switch
+    {
+        double d => double.IsFinite(d) ? d : null,
+        float f => float.IsFinite(f) ? f : null,
+        sbyte or byte or short or ushort or int or uint or long or ulong or decimal =>
+            Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture),
+        _ => null,
+    };
+
+    /// <summary>Consecutive drops accepted before a monotonic tag is treated as having been reset.</summary>
+    private const int MonotonicResetAfter = 3;
+
+    private readonly record struct CounterGuard(double Peak, int Drops);
 
     private static async Task<bool> DelayAsync(TimeSpan delay, CancellationToken ct)
     {

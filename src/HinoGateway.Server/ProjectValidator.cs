@@ -115,8 +115,8 @@ public sealed class ProjectValidator
                 problems.Add($"Tag '{tag.Name}' has a non-finite write limit.");
             if (tag.WriteMin is { } lower && tag.WriteMax is { } upper && lower > upper)
                 problems.Add($"Tag '{tag.Name}' write minimum must not exceed its maximum.");
-            if (tag.Kind == TagKind.Expression && tag.AllowWrite)
-                problems.Add($"Expression tag '{tag.Name}' cannot be writable.");
+            if (tag.Kind is TagKind.Expression or TagKind.Accumulator && tag.AllowWrite)
+                problems.Add($"{tag.Kind} tag '{tag.Name}' cannot be writable.");
             if (tag.GroupId is not null && !groupById.ContainsKey(tag.GroupId))
                 problems.Add($"Tag '{tag.Name}' references missing folder '{tag.GroupId}'.");
 
@@ -158,6 +158,12 @@ public sealed class ProjectValidator
                 if (!string.IsNullOrWhiteSpace(tag.InitialValue)
                     && !InternalTagValues.TryParseInitial(tag.InitialValue, tag.DataType, out _, out var initialError))
                     problems.Add($"Tag '{path}': initial value {initialError?.TrimEnd('.')}.");
+                continue;
+            }
+
+            if (tag.Kind == TagKind.Accumulator)
+            {
+                problems.AddRange(ValidateAccumulator(tag, tagById).Select(p => $"Tag '{path}': {p}"));
                 continue;
             }
 
@@ -237,6 +243,15 @@ public sealed class ProjectValidator
             return problems;
         }
 
+        if (tag.Kind == TagKind.Accumulator)
+        {
+            var byId = allTags.Where(t => !string.IsNullOrWhiteSpace(t.Id))
+                .GroupBy(t => t.Id, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+            problems.AddRange(ValidateAccumulator(tag, byId));
+            return problems;
+        }
+
         if (tag.AllowWrite)
             problems.Add("An expression tag cannot be writable.");
 
@@ -269,6 +284,59 @@ public sealed class ProjectValidator
 
         return problems;
     }
+
+    /// <summary>
+    /// Everything that has to be true of an accumulator before it is allowed to run.
+    ///
+    /// <para>
+    /// These are worth being strict about. An accumulator that quietly does nothing is not obviously
+    /// broken from the outside — it publishes a plausible number — and the number it publishes is the
+    /// one the gateway sends the utility as the plant's daily generation.
+    /// </para>
+    /// </summary>
+    private static List<string> ValidateAccumulator(TagDto tag, IReadOnlyDictionary<string, TagDto> tagById)
+    {
+        var problems = new List<string>();
+
+        if (!Enum.IsDefined(tag.Period))
+            problems.Add("unknown accumulation period.");
+        if (!IsNumeric(tag.DataType))
+            problems.Add($"an accumulated total must be a numeric type, not {tag.DataType}.");
+        if (!double.IsFinite(tag.RolloverAt) || tag.RolloverAt < 0)
+            problems.Add("the rollover point must be zero (no rollover) or a positive number.");
+        if (tag.MaxRatePerHour is { } rate && (!double.IsFinite(rate) || rate <= 0))
+            problems.Add("the maximum rate per hour must be a positive number, or empty to switch the check off.");
+
+        if (string.IsNullOrWhiteSpace(tag.SourceTagKey))
+        {
+            problems.Add("no source counter is selected.");
+            return problems;
+        }
+        if (string.Equals(tag.SourceTagKey, tag.Id, StringComparison.Ordinal))
+        {
+            problems.Add("an accumulator cannot count itself.");
+            return problems;
+        }
+        if (!tagById.TryGetValue(tag.SourceTagKey, out var source))
+        {
+            problems.Add($"its source counter '{tag.SourceTagKey}' does not exist.");
+            return problems;
+        }
+
+        // An expression source is refused for two reasons at once: it would let the two internal
+        // engines feed each other in a loop that neither one's ordering can see, and a cumulative
+        // counter that is computed rather than read is not the thing this design is built on — the
+        // whole point is a register that keeps counting while the gateway is switched off.
+        if (source.Kind is not (TagKind.Device or TagKind.Memory))
+            problems.Add($"its source '{source.Name}' is {source.Kind}; an accumulator counts a device " +
+                         "register or a memory tag, never a computed value.");
+        if (!IsNumeric(source.DataType))
+            problems.Add($"its source '{source.Name}' is {source.DataType}, which is not a counter.");
+
+        return problems;
+    }
+
+    private static bool IsNumeric(DataType type) => type is not (DataType.Bool or DataType.String);
 
     public async Task<IReadOnlyList<string>> ValidateStoredAsync(IConfigStore store, IAlarmStore alarms,
         CancellationToken ct = default)

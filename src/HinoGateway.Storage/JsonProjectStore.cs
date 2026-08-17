@@ -140,6 +140,14 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
                 tag.AllowWrite = true;
         }
 
+        // Version 8 added accumulator tags. Nothing to convert — a version 7 file has no tag of that
+        // kind, and every new field defaults — but the branch exists so that raising CurrentVersion
+        // is a deliberate act with a place to put the migration when one is eventually needed.
+        if (project.Version < 8)
+        {
+            // No conversion required.
+        }
+
         project.Version = HinoProject.CurrentVersion;
     }
 
@@ -431,8 +439,15 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
         {
             var project = CurrentProject;
             var paths = TagPaths.BuildGroupPaths(project.Groups);
+            var pathsByKey = PathsByStorageKey(project, paths);
             IReadOnlyList<TagDto> tags = project.Tags
-                .Select(t => { var copy = Clone(t); copy.Path = TagPaths.TagPath(paths, t.GroupId, t.Name); return copy; })
+                .Select(t =>
+                {
+                    var copy = Clone(t);
+                    copy.Path = TagPaths.TagPath(paths, t.GroupId, t.Name);
+                    copy.SourcePath = t.SourceTagKey is { } key ? pathsByKey.GetValueOrDefault(key, "") : "";
+                    return copy;
+                })
                 .ToList();
             return Task.FromResult(tags);
         }
@@ -444,6 +459,7 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
         {
             var project = CurrentProject;
             var paths = TagPaths.BuildGroupPaths(project.Groups);
+            var pathsByKey = PathsByStorageKey(project, paths);
             IReadOnlyList<TagDefinition> tags = project.Tags
                 .Where(t => t.Kind.IsInternal())
                 .Select(t => new TagDefinition
@@ -459,7 +475,18 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
                     DataType = t.DataType,
                     Unit = t.Unit,
                     Description = t.Description,
-                    AllowWrite = t.AllowWrite,
+                    // An accumulator carries both halves of its source reference: the path to read
+                    // the counter with, and the storage key its durable baselines are filed under.
+                    SourceTagKey = t.SourceTagKey,
+                    SourceTagId = t.SourceTagKey is { } sourceKey
+                        ? pathsByKey.GetValueOrDefault(sourceKey)
+                        : null,
+                    Period = t.Period,
+                    RolloverAt = t.RolloverAt,
+                    MaxRatePerHour = t.MaxRatePerHour,
+                    // An accumulator is never writable, whatever the stored flag says: the number is
+                    // derived, and the counter behind it is the authority.
+                    AllowWrite = t.Kind == TagKind.Accumulator ? false : t.AllowWrite,
                     WriteMin = t.WriteMin,
                     WriteMax = t.WriteMax,
                     // Scale/Offset are deliberately not carried: they are applied by the device
@@ -485,7 +512,8 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
             {
                 var copy = Clone(tag);
                 copy.Id = string.IsNullOrWhiteSpace(tag.Id) ? Guid.NewGuid().ToString("N") : tag.Id.Trim();
-                copy.Path = "";   // derived on read, never stored
+                copy.Path = "";         // derived on read, never stored
+                copy.SourcePath = "";   // likewise: only the storage key is durable
                 project.Tags.Add(copy);
                 transaction?.TagsById.TryAdd(copy.Id, copy);
             }
@@ -514,7 +542,12 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
                 existing.WriteMax = tag.WriteMax;
                 existing.Monotonic = tag.Monotonic;
                 existing.ScanIntervalMs = tag.ScanIntervalMs;
+                existing.SourceTagKey = tag.SourceTagKey;
+                existing.Period = tag.Period;
+                existing.RolloverAt = tag.RolloverAt;
+                existing.MaxRatePerHour = tag.MaxRatePerHour;
                 existing.Path = "";
+                existing.SourcePath = "";
             }
         }
         SaveOrDefer();
@@ -669,6 +702,19 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
 
     private static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Tag storage key → runtime path. This is the lookup that lets an accumulator name its source
+    /// counter by a key that never changes while still reading it by a path that does.
+    /// </summary>
+    private static Dictionary<string, string> PathsByStorageKey(
+        HinoProject project, IReadOnlyDictionary<string, string> groupPaths)
+    {
+        var byKey = new Dictionary<string, string>(project.Tags.Count, StringComparer.Ordinal);
+        foreach (var tag in project.Tags)
+            byKey[tag.Id] = TagPaths.TagPath(groupPaths, tag.GroupId, tag.Name);
+        return byKey;
+    }
+
     /// <summary>Deep copy through JSON — the options tree is small and this cannot miss a new field.</summary>
     private static Iec104ServerOptions Clone(Iec104ServerOptions options) =>
         JsonSerializer.Deserialize<Iec104ServerOptions>(JsonSerializer.Serialize(options, Json), Json)!;
@@ -737,6 +783,11 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
         WriteMax = t.WriteMax,
         Monotonic = t.Monotonic,
         ScanIntervalMs = t.ScanIntervalMs,
+        SourceTagKey = t.SourceTagKey,
+        SourcePath = t.SourcePath,
+        Period = t.Period,
+        RolloverAt = t.RolloverAt,
+        MaxRatePerHour = t.MaxRatePerHour,
     };
 
     private static AlarmDto Clone(AlarmDto a) => new()

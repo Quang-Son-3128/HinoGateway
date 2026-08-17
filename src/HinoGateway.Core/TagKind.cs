@@ -35,6 +35,21 @@ public enum TagKind
     /// (the next evaluation would overwrite it).
     /// </summary>
     Expression = 2,
+
+    /// <summary>
+    /// Energy (or any other quantity) accumulated over a calendar period, from a device's own
+    /// cumulative counter: today's kWh, yesterday's, this month's.
+    ///
+    /// <para>
+    /// It is a separate kind rather than a formula because the answer is a <b>subtraction</b> —
+    /// counter now minus counter at the start of the period — and the only thing that has to survive
+    /// a power cut is the baseline. An expression that added <c>P × dt</c> every second would instead
+    /// have to survive every second of the day, and one bad reading would be wrong forever. Read-only:
+    /// the number is derived, and a device counter that kept counting while the gateway was off is
+    /// the authority on it.
+    /// </para>
+    /// </summary>
+    Accumulator = 3,
 }
 
 /// <summary>When an <see cref="TagKind.Expression"/> tag is recomputed.</summary>
@@ -61,8 +76,17 @@ public static class TagKinds
     /// Is this tag produced by the gateway itself rather than by a driver? Such tags have no
     /// connection, no address and no scaling, and are run by the internal engine.
     /// </summary>
-    public static bool IsInternal(this TagKind kind) => kind is TagKind.Memory or TagKind.Expression;
+    public static bool IsInternal(this TagKind kind) =>
+        kind is TagKind.Memory or TagKind.Expression or TagKind.Accumulator;
 
     /// <summary>Can an operator (or a northbound command) write to a tag of this kind?</summary>
     public static bool IsWritable(this TagKind kind) => kind is TagKind.Device or TagKind.Memory;
+
+    /// <summary>
+    /// Which internal producer runs this kind. Both are fed by the same store and look identical from
+    /// the outside, but they are separate engines: the expression engine sorts a dependency graph,
+    /// the accumulator engine keeps durable baselines. Handing one an entry meant for the other is a
+    /// mistake with no symptom until the tag simply never produces a value.
+    /// </summary>
+    public static bool IsExpressionEngine(this TagKind kind) => kind is TagKind.Memory or TagKind.Expression;
 }

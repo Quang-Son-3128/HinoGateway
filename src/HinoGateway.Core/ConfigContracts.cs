@@ -140,6 +140,25 @@ public sealed class TagDto
     /// <summary>When an expression tag recomputes: on its scan interval, or when an input changes.</summary>
     public EvalMode EvalMode { get; set; } = EvalMode.Scan;
 
+    /// <summary>
+    /// An accumulator's source counter, by <b>storage key</b> — never by path. A path is a folder
+    /// tree position, and one rename would silently disconnect the tag reporting yesterday's energy
+    /// to the utility. See <see cref="TagDefinition.SourceTagKey"/>.
+    /// </summary>
+    public string? SourceTagKey { get; set; }
+
+    /// <summary>The source's runtime path, computed server-side from <see cref="SourceTagKey"/>. Read-only.</summary>
+    public string SourcePath { get; set; } = "";
+
+    /// <summary>Which calendar period an accumulator reports. See <see cref="AccumulationPeriod"/>.</summary>
+    public AccumulationPeriod Period { get; set; } = AccumulationPeriod.Day;
+
+    /// <summary>Engineering value at which the source counter wraps; 0 = never. See <see cref="TagDefinition.RolloverAt"/>.</summary>
+    public double RolloverAt { get; set; }
+
+    /// <summary>Spike guard on the source, in engineering units per hour; null = off.</summary>
+    public double? MaxRatePerHour { get; set; }
+
     public DataType DataType { get; set; } = DataType.Float64;
     public string? Unit { get; set; }
     public string? Description { get; set; }

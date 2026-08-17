@@ -13,6 +13,8 @@ namespace HinoGateway.Core;
 ///  4 — adds the IEC-104 controlled-station configuration.
 ///  5 — adds the MQTT northbound publisher and disk-spool configuration.
 ///  6 — adds tag kinds: memory and expression tags alongside the device tags.
+///  7 — splits "commandable" into RequireSelect on the IEC point and AllowWrite on the tag.
+///  8 — adds accumulator tags (persistent daily/monthly energy from a device counter).
 /// Older files stay importable: version-1 per-device tags are converted into one folder per
 /// device, and collections missing from an older file are simply empty. A version-5 file has no
 /// <c>Kind</c> on its tags, which deserialises to <see cref="TagKind.Device"/> — the only kind that
@@ -21,7 +23,7 @@ namespace HinoGateway.Core;
 public sealed class HinoProject
 {
     public const string FormatTag = "hino-project";
-    public const int CurrentVersion = 7;
+    public const int CurrentVersion = 8;
 
     public string Format { get; set; } = FormatTag;
     public int Version { get; set; } = CurrentVersion;

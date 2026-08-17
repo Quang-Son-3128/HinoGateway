@@ -34,6 +34,16 @@ public sealed class DeviceEngine : IAsyncDisposable
     /// <summary>Where retentive memory tags keep their value across a restart. Null = not retained.</summary>
     private readonly IRetainedValueStore? _retained;
 
+    /// <summary>
+    /// The durable energy baselines. Held by the engine and NOT by a runtime snapshot on purpose:
+    /// "Apply to engine" rebuilds the snapshot, and a baseline that lived there would take the day's
+    /// energy with it every time an operator saved a tag.
+    /// </summary>
+    private readonly IAccumulatorStateStore? _accumulatorState;
+
+    private readonly ISampleHistory? _history;
+    private readonly IEnergyJournal? _energyJournal;
+
     /// <summary>The live runtime. Volatile: readers must see a fully built snapshot or the old one.</summary>
     private volatile Runtime _runtime = Runtime.Empty;
     private long _abandonedWorkers;
@@ -47,11 +57,20 @@ public sealed class DeviceEngine : IAsyncDisposable
     /// Persists the memory tags marked <see cref="TagDefinition.Retentive"/>. Null (the default)
     /// means nothing survives a restart, which is the safe position for a control setpoint.
     /// </param>
+    /// <param name="accumulatorState">
+    /// Persists the energy baselines. Null means the accumulator tags cannot keep a period across a
+    /// restart, so they are refused rather than silently restarted from zero each morning.
+    /// </param>
     public DeviceEngine(IEnumerable<IDeviceDriverFactory> factories, TagStore store, ILoggerFactory loggerFactory,
-        ISecretStore? secrets = null, IRetainedValueStore? retained = null)
+        ISecretStore? secrets = null, IRetainedValueStore? retained = null,
+        IAccumulatorStateStore? accumulatorState = null, ISampleHistory? history = null,
+        IEnergyJournal? energyJournal = null)
     {
         _secrets = secrets;
         _retained = retained;
+        _accumulatorState = accumulatorState;
+        _history = history;
+        _energyJournal = energyJournal;
         _factories = factories.ToDictionary(f => f.DriverType, StringComparer.OrdinalIgnoreCase);
         Tags = store;
         _loggerFactory = loggerFactory;
@@ -84,6 +103,13 @@ public sealed class DeviceEngine : IAsyncDisposable
     /// <summary>Counters of the memory and expression tags this engine is running.</summary>
     public InternalTagStats InternalTags => _runtime.Internal?.Stats ?? new InternalTagStats(0, 0, 0, 0, 0);
 
+    /// <summary>Counters of the accumulator tags this engine is running.</summary>
+    public AccumulatorStats Accumulators => _runtime.Accumulators?.Stats ?? new AccumulatorStats(0, 0, 0, 0, 0);
+
+    /// <summary>The live energy baselines, for the reconciliation endpoint.</summary>
+    public IReadOnlyList<AccumulatorSourceInfo> AccumulatorSources =>
+        _runtime.Accumulators?.Sources ?? [];
+
     /// <summary>
     /// Build and publish a configuration without starting the workers (startup path — the host calls
     /// <see cref="StartAll"/> once everything else is wired up).
@@ -102,6 +128,7 @@ public sealed class DeviceEngine : IAsyncDisposable
         foreach (var worker in runtime.Workers)
             worker.Start();
         runtime.Internal?.Start();
+        runtime.Accumulators?.Start();
         _logger.LogInformation("DeviceEngine started {Count} device worker(s)", runtime.Workers.Count);
     }
 
@@ -196,6 +223,12 @@ public sealed class DeviceEngine : IAsyncDisposable
                     await internals.WriteAsync(tagId, value, ct);
                     return;
                 }
+
+                // Named explicitly, because "no running device owns this tag" would send an engineer
+                // looking for a connection problem that does not exist.
+                if (runtime.Accumulators is { } accumulators && accumulators.Owns(tagId))
+                    throw new NotSupportedException(
+                        $"Tag '{tagId}' is an accumulated total derived from a counter; writing to it has no meaning.");
 
                 if (!runtime.WorkersByTag.TryGetValue(tagId, out var worker))
                     throw new KeyNotFoundException($"No running device owns tag '{tagId}'.");
@@ -337,13 +370,22 @@ public sealed class DeviceEngine : IAsyncDisposable
         // The internal tags are built last, and deliberately before the old runtime is stopped: their
         // memory values are seeded from what the tag store still holds, which is how an operator's
         // setpoint survives an "Apply to engine".
+        //
+        // They are also SPLIT BY KIND here. Both producers are fed from one list of "tags with no
+        // connection", and handing an accumulator to the expression engine — which refuses every kind
+        // it does not know — would leave the plant's energy tags simply never producing a value, with
+        // no error anywhere to explain it.
         InternalTagEngine? internals = null;
+        AccumulatorEngine? accumulators = null;
         try
         {
-            if (internalTags is { Count: > 0 })
+            var expressionTags = internalTags?.Where(t => t.Kind.IsExpressionEngine()).ToList();
+            var accumulatorTags = internalTags?.Where(t => t.Kind == TagKind.Accumulator).ToList();
+
+            if (expressionTags is { Count: > 0 })
             {
                 internals = new InternalTagEngine(Tags, _loggerFactory.CreateLogger("Tags.Internal"), _retained);
-                internals.Load(internalTags);
+                internals.Load(expressionTags);
                 foreach (var tagId in internals.TagIds)
                     configuredTagIds.Add(tagId);
 
@@ -353,12 +395,41 @@ public sealed class DeviceEngine : IAsyncDisposable
                     droppedTags.Add(new DroppedTag(InternalDeviceId, tagId, reason));
             }
 
-            return new Runtime(workers, workersByTag, rejected, rejectedTags, droppedTags, configuredTagIds, leases, internals);
+            if (accumulatorTags is { Count: > 0 })
+            {
+                if (_accumulatorState is null)
+                {
+                    // Refused rather than run without durable baselines: an accumulator that silently
+                    // forgets its baseline reports the plant's whole day as whatever has accrued since
+                    // the last restart, and that number looks perfectly plausible.
+                    foreach (var tag in accumulatorTags)
+                    {
+                        configuredTagIds.Add(tag.Id);
+                        droppedTags.Add(new DroppedTag(InternalDeviceId, tag.Id,
+                            "no durable store for the energy baselines is configured"));
+                    }
+                }
+                else
+                {
+                    accumulators = new AccumulatorEngine(Tags, _loggerFactory.CreateLogger("Tags.Accumulators"),
+                        _accumulatorState, _history, _energyJournal);
+                    accumulators.Load(accumulatorTags);
+                    foreach (var tagId in accumulators.TagIds)
+                        configuredTagIds.Add(tagId);
+                    foreach (var (tagId, reason) in accumulators.Faults)
+                        droppedTags.Add(new DroppedTag(InternalDeviceId, tagId, reason));
+                }
+            }
+
+            return new Runtime(workers, workersByTag, rejected, rejectedTags, droppedTags, configuredTagIds,
+                leases, internals, accumulators);
         }
         catch
         {
             if (internals is not null)
                 try { await internals.DisposeAsync(); } catch { }
+            if (accumulators is not null)
+                try { await accumulators.DisposeAsync(); } catch { }
             foreach (var worker in workers)
                 try { await worker.DisposeAsync(); } catch { }
             foreach (var lease in leases)
@@ -504,6 +575,8 @@ public sealed class DeviceEngine : IAsyncDisposable
         // and there is no reason to keep computing from a fleet that is being taken down.
         if (runtime.Internal is { } internals)
             await internals.DisposeAsync();
+        if (runtime.Accumulators is { } accumulators)
+            await accumulators.DisposeAsync();
 
         // Stop all workers concurrently so shutdown isn't serialized across slow devices.
         await Task.WhenAll(runtime.Workers.Select(w => w.DisposeAsync().AsTask()));
@@ -563,7 +636,8 @@ public sealed class DeviceEngine : IAsyncDisposable
         IReadOnlyList<DroppedTag> DroppedTags,
         IReadOnlySet<string> ConfiguredTagIds,
         IReadOnlyList<TransportRegistry.TransportLease> Leases,
-        InternalTagEngine? Internal)
+        InternalTagEngine? Internal,
+        AccumulatorEngine? Accumulators)
     {
         private readonly object _leaseGate = new();
         private int _activeWrites;
@@ -578,6 +652,7 @@ public sealed class DeviceEngine : IAsyncDisposable
             Array.Empty<DroppedTag>(),
             new HashSet<string>(),
             Array.Empty<TransportRegistry.TransportLease>(),
+            null,
             null);
 
         public bool TryAcquireWrite(out IDisposable lease)

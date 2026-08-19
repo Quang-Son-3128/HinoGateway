@@ -17,14 +17,14 @@
     </MudButton>
 </div>
 
-<MudText Typo="Typo.caption" Class="d-block mb-3" Style="opacity:.6">
+<MudText Typo="Typo.caption" Class="d-block mb-3 hino-muted">
     Alarms are evaluated on top of the live tag stream, so a change here takes effect immediately —
     no "Apply to engine" step and no interruption to data acquisition.
 </MudText>
 
 @if (_editing is not null)
 {
-    <MudPaper Class="pa-4 mb-4" Elevation="0" Outlined Style="border-left:3px solid var(--mud-palette-primary)">
+    <MudPaper Class="pa-4 mb-4 hino-panel-accent" Elevation="0" Outlined>
         <MudText Typo="Typo.subtitle2" Class="mb-3">@(_isNew ? "New alarm" : $"Edit — {_editing.Name}")</MudText>
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="6" md="3">
@@ -101,7 +101,7 @@
 
         @if (_selectedTag is not null)
         {
-            <MudText Typo="Typo.caption" Class="mono d-block mt-2" Style="opacity:.6">
+            <MudText Typo="Typo.caption" Class="mono d-block mt-2 hino-muted">
                 Watching: @_selectedTag.Path @(string.IsNullOrEmpty(_selectedTag.Unit) ? "" : $"[{_selectedTag.Unit}]")
                 — @ExplainCondition()
             </MudText>
@@ -117,9 +117,9 @@
 
 <MudPaper Elevation="0" Outlined>
     <MudToolBar Dense Class="px-3" Style="gap:.6rem">
-        <MudIcon Icon="@Icons.Material.Filled.Rule" Size="Size.Small" Style="opacity:.6" />
+        <MudIcon Icon="@Icons.Material.Filled.Rule" Size="Size.Small" Class="hino-muted" />
         <MudText Typo="Typo.subtitle2">Configured alarms</MudText>
-        <MudText Typo="Typo.caption" Class="mono" Style="opacity:.5">@_alarms.Count</MudText>
+        <MudText Typo="Typo.caption" Class="mono hino-muted">@_alarms.Count</MudText>
         <MudSpacer />
         <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="LoadAsync" />
     </MudToolBar>
@@ -127,9 +127,9 @@
     @if (_alarms.Count == 0)
     {
         <div class="alarm-empty">
-            <MudIcon Icon="@Icons.Material.Filled.NotificationsOff" Style="opacity:.4;font-size:2rem" />
+            <MudIcon Icon="@Icons.Material.Filled.NotificationsOff" Class="hino-empty-icon" />
             <MudText Typo="Typo.subtitle1">No alarms configured</MudText>
-            <MudText Typo="Typo.caption" Style="opacity:.6">Add one to start supervising a tag.</MudText>
+            <MudText Typo="Typo.caption" Class="hino-muted">Add one to start supervising a tag.</MudText>
         </div>
     }
     else
@@ -157,36 +157,36 @@
                                        OnClick="@(() => ToggleAsync(context))" Disabled="_busy" />
                     </MudTooltip>
                 </MudTd>
-                <MudTd DataLabel="Name" Style="@(context.Enabled ? "font-weight:600" : "font-weight:600;opacity:.5")">@context.Name</MudTd>
+                <MudTd DataLabel="Name" Class="@(context.Enabled ? "" : "hino-muted")" Style="font-weight:600">@context.Name</MudTd>
                 <MudTd DataLabel="Tag">
                     @if (string.IsNullOrEmpty(context.TagPath))
                     {
                         <MudTooltip Text="The referenced tag no longer exists — this alarm is not evaluated">
-                            <span class="mono" style="font-size:.8rem;color:var(--hino-bad)">missing tag</span>
+                            <span class="mono txt-sm" style="color:var(--hino-bad)">missing tag</span>
                         </MudTooltip>
                     }
                     else
                     {
-                        <MudLink Href="@($"tags?select={Uri.EscapeDataString(context.TagPath)}")" Class="mono" Style="font-size:.8rem">@context.TagPath</MudLink>
+                        <MudLink Href="@($"tags?select={Uri.EscapeDataString(context.TagPath)}")" Class="mono txt-sm">@context.TagPath</MudLink>
                     }
                 </MudTd>
-                <MudTd DataLabel="Condition"><span class="mono" style="font-size:.8rem">@ConditionLabel(context.Condition)</span></MudTd>
+                <MudTd DataLabel="Condition"><span class="mono txt-sm">@ConditionLabel(context.Condition)</span></MudTd>
                 <MudTd DataLabel="Limit" Style="text-align:right">
-                    <span class="mono" style="font-size:.8rem">@(IsLevel(context.Condition) ? context.Limit.ToString("0.###") : "—")</span>
+                    <span class="mono txt-sm">@(IsLevel(context.Condition) ? context.Limit.ToString("0.###") : "—")</span>
                 </MudTd>
                 <MudTd DataLabel="Hyst." Style="text-align:right">
-                    <span class="mono" style="font-size:.8rem;opacity:.7">@(IsLevel(context.Condition) ? context.Hysteresis.ToString("0.###") : "—")</span>
+                    <span class="mono txt-sm hino-dim">@(IsLevel(context.Condition) ? context.Hysteresis.ToString("0.###") : "—")</span>
                 </MudTd>
                 <MudTd DataLabel="Delays" Style="text-align:right">
-                    <span class="mono" style="font-size:.78rem;opacity:.7">@context.OnDelayMs / @context.OffDelayMs</span>
+                    <span class="mono txt-sm hino-dim">@context.OnDelayMs / @context.OffDelayMs</span>
                 </MudTd>
                 <MudTd DataLabel="Severity">
                     <span class="sev-badge" style="background:@SeverityColor(context.Severity)">@context.Severity.ToString().ToUpperInvariant()</span>
                 </MudTd>
                 <MudTd DataLabel="Ack">
-                    <span class="mono" style="font-size:.75rem;opacity:.7">@(context.RequiresAck ? "required" : "auto")</span>
+                    <span class="mono txt-sm hino-dim">@(context.RequiresAck ? "required" : "auto")</span>
                 </MudTd>
-                <MudTd DataLabel="Message" Style="opacity:.7;font-size:.85rem">@context.Message</MudTd>
+                <MudTd DataLabel="Message" Class="txt-sm hino-dim">@context.Message</MudTd>
                 <MudTd Style="text-align:right;white-space:nowrap">
                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => Edit(context))" Disabled="_busy" />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"

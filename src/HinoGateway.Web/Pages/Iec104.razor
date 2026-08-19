@@ -25,7 +25,7 @@
     </MudButton>
 </div>
 
-<MudText Typo="Typo.caption" Class="d-block mb-3" Style="opacity:.6">
+<MudText Typo="Typo.caption" Class="d-block mb-3 hino-muted">
     The gateway acts as a <b>controlled station</b>: the control centre connects in, interrogates it,
     receives changes and may send commands. Commands go through the same validation and scaling as any
     other write, so a setpoint from the dispatcher lands on the device exactly as one typed locally would.
@@ -64,7 +64,7 @@
     </div>
     <div class="kpi @(_status.CommandsRejected > 0 ? "kpi-bad" : "kpi-neutral")">
         <div class="kpi-label">Commands</div>
-        <div class="kpi-value">@_status.CommandsAccepted<span style="opacity:.45;font-size:.7em"> ok</span></div>
+        <div class="kpi-value">@_status.CommandsAccepted<span class="hino-muted" style="font-size:.7em"> ok</span></div>
         <div class="kpi-sub">@_status.CommandsRejected refused; @_status.PendingCommands/@_status.CommandCapacity queued; @_status.CommandTimeouts timeout</div>
     </div>
     @if (_status.DroppedUpdates + _status.CapacityDrops > 0)
@@ -155,16 +155,16 @@
                 <MudItem xs="4" md="2"><MudNumericField @bind-Value="_options.T2" Label="t2 (s)" Min="1" Max="255" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
                 <MudItem xs="4" md="2"><MudNumericField @bind-Value="_options.T3" Label="t3 (s)" Min="1" Max="255" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             </MudGrid>
-            <MudText Typo="Typo.caption" Style="opacity:.6">t2 must be shorter than t1. Leave these alone unless the utility specifies otherwise.</MudText>
+            <MudText Typo="Typo.caption" Class="hino-muted">t2 must be shorter than t1. Leave these alone unless the utility specifies otherwise.</MudText>
         </MudExpansionPanel>
     </MudExpansionPanels>
 </MudPaper>
 
 <MudPaper Elevation="0" Outlined>
     <MudToolBar Dense Class="px-3" Style="gap:.6rem">
-        <MudIcon Icon="@Icons.Material.Filled.FormatListNumbered" Size="Size.Small" Style="opacity:.6" />
+        <MudIcon Icon="@Icons.Material.Filled.FormatListNumbered" Size="Size.Small" Class="hino-muted" />
         <MudText Typo="Typo.subtitle2">Signal list</MudText>
-        <MudText Typo="Typo.caption" Class="mono" Style="opacity:.5">@_options.Points.Count</MudText>
+        <MudText Typo="Typo.caption" Class="mono hino-muted">@_options.Points.Count</MudText>
         <MudSpacer />
         <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddPoint" Disabled="_busy">Add point</MudButton>
         <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
@@ -176,9 +176,9 @@
     @if (_options.Points.Count == 0)
     {
         <div class="alarm-empty">
-            <MudIcon Icon="@Icons.Material.Filled.FormatListNumbered" Style="opacity:.4;font-size:2rem" />
+            <MudIcon Icon="@Icons.Material.Filled.FormatListNumbered" Class="hino-empty-icon" />
             <MudText Typo="Typo.subtitle1">No points mapped</MudText>
-            <MudText Typo="Typo.caption" Style="opacity:.6">
+            <MudText Typo="Typo.caption" Class="hino-muted">
                 Add them here, or import the utility's signal list as CSV
                 (<span class="mono">TagPath,Ioa,Type,Deadband,WithTimestamp,Command,ReportScale,RequireSelect</span>).
                 Type and Command accept the utility's numbers — <span class="mono">T13</span>,
@@ -237,7 +237,7 @@
                     <div class="d-flex align-center" style="gap:.35rem">
                         <MudSwitch T="bool" Value="context.WithTimestamp" ValueChanged="@(v => context.WithTimestamp = v)"
                                    Color="Color.Primary" Size="Size.Small" />
-                        <span class="mono" style="font-size:.72rem;opacity:.65">
+                        <span class="mono txt-xs hino-dim">
                             T@(Iec104TypeIds.Number(context.Type, context.WithTimestamp))
                         </span>
                     </div>

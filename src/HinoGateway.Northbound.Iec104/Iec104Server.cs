@@ -20,6 +20,14 @@ public delegate Task Iec104AuditWriter(Iec104ControlAudit entry);
 public delegate void Iec104LoopHealth(string loop, Exception? failure);
 
 /// <summary>
+/// Which commands must not overtake each other: two tag paths that map to the same key are executed
+/// one at a time, in admission order. The host answers with the device behind the tag, because the
+/// thing that cannot be shared is one physical link — two points on the same PLC are one queue, and
+/// two PLCs are two queues however many control centres the commands arrived from.
+/// </summary>
+public delegate string Iec104CommandPartitioner(string tagPath);
+
+/// <summary>
 /// The gateway as an IEC 60870-5-104 <b>controlled station</b>: it listens on 2404 and the utility's
 /// control centre connects in, interrogates the station, receives spontaneous changes and issues
 /// commands. This is the northbound direction — the opposite of a device driver.
@@ -47,6 +55,7 @@ public sealed class Iec104Server : IAsyncDisposable
     private readonly ILogger<Iec104Server> _logger;
     private readonly Iec104AuditWriter? _audit;
     private readonly Iec104LoopHealth? _loopHealth;
+    private readonly Iec104CommandPartitioner _partition;
 
     private readonly Dictionary<int, Iec104PointDto> _byIoa;
     private readonly Dictionary<string, List<Iec104PointDto>> _byTagPath;
@@ -65,8 +74,9 @@ public sealed class Iec104Server : IAsyncDisposable
     private CancellationTokenSource? _cts;
     private Task? _pump;
     private Task? _periodic;
-    private Channel<CommandWorkItem>? _commandQueue;
-    private Task? _commandPump;
+
+    // One lane per physical destination, created on first use. See CommandLane.
+    private ConcurrentDictionary<string, CommandLane>? _commandLanes;
     private int _pendingCommands;
     private int _stopping;
 
@@ -86,7 +96,8 @@ public sealed class Iec104Server : IAsyncDisposable
     }
 
     public Iec104Server(Iec104ServerOptions options, TagStore tags, Iec104CommandWriter writer,
-        ILogger<Iec104Server> logger, Iec104AuditWriter? audit = null, Iec104LoopHealth? loopHealth = null)
+        ILogger<Iec104Server> logger, Iec104AuditWriter? audit = null, Iec104LoopHealth? loopHealth = null,
+        Iec104CommandPartitioner? partitioner = null)
     {
         _options = options;
         _tags = tags;
@@ -94,6 +105,10 @@ public sealed class Iec104Server : IAsyncDisposable
         _logger = logger;
         _audit = audit;
         _loopHealth = loopHealth;
+        // Without a host to ask, every point is its own lane. That is still correct — order is only
+        // ever promised between commands to the same point — it just parallelises more finely than
+        // the physical link warrants.
+        _partition = partitioner ?? (tagPath => tagPath);
 
         // Last mapping wins on a duplicated IOA; the configuration API rejects duplicates before we
         // ever get here, so this is only a safety net.
@@ -146,14 +161,8 @@ public sealed class Iec104Server : IAsyncDisposable
             return;
 
         Interlocked.Exchange(ref _stopping, 0);
-        _commandQueue = Channel.CreateBounded<CommandWorkItem>(new BoundedChannelOptions(
-            Math.Clamp(_options.CommandQueueCapacity, 1, 10_000))
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = true,
-            SingleWriter = false,
-            AllowSynchronousContinuations = false,
-        });
+        Interlocked.Exchange(ref _pendingCommands, 0);
+        _commandLanes = new ConcurrentDictionary<string, CommandLane>(StringComparer.Ordinal);
 
         var apci = new APCIParameters
         {
@@ -201,7 +210,6 @@ public sealed class Iec104Server : IAsyncDisposable
         // Keep the newest batches: state, not history, is what the control centre acts on.
         _subscription = _tags.Subscribe("iec104", capacity: Math.Clamp(_options.OutboundQueueCapacity, 64, 100_000), dropOldest: true);
         _pump = Task.Run(() => SuperviseAsync("reporting", PumpAsync, _cts.Token));
-        _commandPump = Task.Run(() => SuperviseAsync("command dispatcher", CommandPumpAsync, _cts.Token));
         if (_options.PeriodicIntervalSeconds > 0)
             _periodic = Task.Run(() => SuperviseAsync("periodic transmission", PeriodicAsync, _cts.Token));
 
@@ -253,16 +261,28 @@ public sealed class Iec104Server : IAsyncDisposable
     public async Task StopAsync()
     {
         Interlocked.Exchange(ref _stopping, 1);
-        _commandQueue?.Writer.TryComplete();
+
+        // Snapshot before cancelling: the dictionary is closed to new lanes by _stopping, and every
+        // lane already created has to be completed and awaited or an admitted command would be left
+        // without the negative termination its control centre is waiting for.
+        var lanes = _commandLanes;
+        var lanePumps = Array.Empty<Task>();
+        if (lanes is not null)
+        {
+            foreach (var lane in lanes.Values)
+                lane.Queue.Writer.TryComplete();
+            lanePumps = lanes.Values.Select(l => l.Pump).ToArray();
+        }
+
         _cts?.Cancel();
-        foreach (var task in new[] { _pump, _periodic, _commandPump })
+        foreach (var task in new[] { _pump, _periodic }.Concat(lanePumps))
         {
             if (task is null)
                 continue;
             try { await task; } catch (OperationCanceledException) { /* expected */ }
         }
-        _pump = _periodic = _commandPump = null;
-        _commandQueue = null;
+        _pump = _periodic = null;
+        _commandLanes = null;
         Interlocked.Exchange(ref _pendingCommands, 0);
 
         _subscription?.Dispose();
@@ -902,23 +922,31 @@ public sealed class Iec104Server : IAsyncDisposable
         _selected.TryRemove(ioa, out _);
 
         // Never let control-centre traffic create unbounded Tasks. The synchronous protocol callback
-        // only admits the command into a bounded queue; one dispatcher then preserves command order
-        // and applies a deadline that includes time spent waiting behind earlier commands.
-        var queue = _commandQueue;
-        if (queue is null || Volatile.Read(ref _stopping) != 0)
+        // only admits the command; a dispatcher per destination then preserves order towards that
+        // destination and applies a deadline that includes time spent queued behind earlier commands.
+        var lanes = _commandLanes;
+        if (lanes is null || Volatile.Read(ref _stopping) != 0)
         {
+            Reject(connection, asdu);
+            return true;
+        }
+
+        // Capacity is global even though the queues are not: the resource being protected is this
+        // process, and a per-lane limit would multiply by however many devices the project happens
+        // to have.
+        if (!TryReserveCommandSlot())
+        {
+            _logger.LogWarning("IEC-104: command {Type} IOA {Ioa} refused — command queue is full ({Capacity})",
+                asdu.TypeId, ioa, Math.Clamp(_options.CommandQueueCapacity, 1, 10_000));
             Reject(connection, asdu);
             return true;
         }
 
         var remote = (connection as ClientConnection)?.RemoteEndpoint?.Address.ToString();
         var command = new CommandWorkItem(connection, asdu, point, value!, remote, DateTimeOffset.UtcNow);
-        Interlocked.Increment(ref _pendingCommands);
-        if (!queue.Writer.TryWrite(command))
+        if (!Lane(lanes, point).Queue.Writer.TryWrite(command))
         {
             Interlocked.Decrement(ref _pendingCommands);
-            _logger.LogWarning("IEC-104: command {Type} IOA {Ioa} refused — command queue is full ({Capacity})",
-                asdu.TypeId, ioa, Math.Clamp(_options.CommandQueueCapacity, 1, 10_000));
             Reject(connection, asdu);
             return true;
         }
@@ -940,9 +968,67 @@ public sealed class Iec104Server : IAsyncDisposable
         return true;
     }
 
-    private async Task CommandPumpAsync(CancellationToken ct)
+    /// <summary>
+    /// A queue and its dispatcher, for one physical destination.
+    ///
+    /// <para>
+    /// This used to be a single queue with a single reader that awaited each command before taking
+    /// the next. Every command in the station therefore queued behind every other one, and a command
+    /// takes as long as the device takes to answer — so one PLC that had stopped responding held up
+    /// commands to every healthy PLC for its full deadline, each. At the defaults, 10 s per command
+    /// against a queue of 256, a command to a healthy device could wait about 42 minutes behind a
+    /// single dead one. The README promised the opposite.
+    /// </para>
+    ///
+    /// <para>
+    /// Splitting by destination keeps the guarantee that actually matters — commands towards one
+    /// device are still executed one at a time, in the order the control centre sent them — and
+    /// drops the one that was never wanted, that unrelated devices wait for each other. Lanes are
+    /// created on demand and live as long as the server: a reload builds a new server, so there is
+    /// no separate cleanup path to get wrong.
+    /// </para>
+    /// </summary>
+    private sealed record CommandLane(Channel<CommandWorkItem> Queue, Task Pump);
+
+    private CommandLane Lane(ConcurrentDictionary<string, CommandLane> lanes, Iec104PointDto point)
     {
-        var queue = _commandQueue!;
+        var key = _partition(point.TagPath) ?? point.TagPath;
+        return lanes.GetOrAdd(key, static (_, state) => state.Self.CreateLane(state.Token),
+            (Self: this, Token: _cts?.Token ?? CancellationToken.None));
+    }
+
+    private CommandLane CreateLane(CancellationToken ct)
+    {
+        // Unbounded, because admission is already counted globally in TryReserveCommandSlot and a
+        // second bound here could only reject a command that the station had already accepted.
+        var queue = Channel.CreateUnbounded<CommandWorkItem>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false,
+        });
+        // Supervised under the one shared name so that health reports a dispatcher that is up or
+        // down, rather than a component per device appearing and going stale across reloads.
+        var pump = Task.Run(() => SuperviseAsync("command dispatcher", token => CommandPumpAsync(queue, token), ct), ct);
+        return new CommandLane(queue, pump);
+    }
+
+    /// <summary>Global admission, replacing the bounded channel the single queue used to be.</summary>
+    private bool TryReserveCommandSlot()
+    {
+        var capacity = Math.Clamp(_options.CommandQueueCapacity, 1, 10_000);
+        while (true)
+        {
+            var observed = Volatile.Read(ref _pendingCommands);
+            if (observed >= capacity)
+                return false;
+            if (Interlocked.CompareExchange(ref _pendingCommands, observed + 1, observed) == observed)
+                return true;
+        }
+    }
+
+    private async Task CommandPumpAsync(Channel<CommandWorkItem> queue, CancellationToken ct)
+    {
         try
         {
             while (await WaitForUpdatesAsync(queue.Reader, "command dispatcher", ct))

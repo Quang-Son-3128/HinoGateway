@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using HinoGateway.Engine;
 
@@ -20,24 +21,44 @@ public sealed record ControlResult(string CommandId, ControlOutcome Outcome, str
 public sealed class ControlCommandOptions
 {
     public int QueueCapacity { get; set; } = 256;
+
+    /// <summary>
+    /// Retained so an existing appsettings.json still binds, and no longer used: there is now one
+    /// queue per device rather than a fixed pool that devices were hashed into, so there is no
+    /// number here to get right. Removing the property outright would fail configuration binding on
+    /// every gateway already deployed.
+    /// </summary>
+    [Obsolete("Commands are queued per device; this no longer has an effect.")]
     public int WorkerCount { get; set; } = 8;
+
     public int TimeoutMs { get; set; } = 10_000;
 }
 
 /// <summary>
-/// Globally bounded command admission with a single-reader partition per device. This preserves
-/// FIFO on a physical PLC connection while allowing independent devices to make progress in
-/// parallel. Once admitted, every command is completed explicitly, including during shutdown.
+/// Globally bounded command admission with a single-reader queue per device. This preserves FIFO on
+/// a physical PLC connection while allowing independent devices to make progress in parallel. Once
+/// admitted, every command is completed explicitly, including during shutdown.
+///
+/// <para>
+/// "Per device" was previously approximate: the device id was hashed into a fixed eight partitions,
+/// so two unrelated devices shared a queue as soon as their hashes collided — with eight slots that
+/// is more likely than not by the fifth device. The consequence was the one this class exists to
+/// prevent: a command to a healthy PLC waiting out the full deadline of a command to a dead one.
+/// A dictionary keyed by the device itself has no collisions to reason about, and the number of
+/// queues is bounded by the number of devices in the project rather than by a constant that had to
+/// be guessed.
+/// </para>
 /// </summary>
 public sealed class ControlCommandService : BackgroundService
 {
-    private readonly Channel<Pending>[] _partitions;
+    private readonly ConcurrentDictionary<string, Lane> _lanes = new(StringComparer.Ordinal);
     private readonly DeviceEngine _engine;
     private readonly AuditTrail _audit;
     private readonly ComponentHealthRegistry _health;
     private readonly ILogger<ControlCommandService> _logger;
     private readonly ControlCommandOptions _options;
     private readonly int _capacity;
+    private readonly CancellationTokenSource _lifetime = new();
     private int _pendingCount;
     private int _accepting = 1;
 
@@ -50,14 +71,25 @@ public sealed class ControlCommandService : BackgroundService
         _options = options;
         _logger = logger;
         _capacity = Math.Clamp(options.QueueCapacity, 1, 100_000);
-        _partitions = Enumerable.Range(0, Math.Clamp(options.WorkerCount, 1, 64))
-            .Select(_ => Channel.CreateUnbounded<Pending>(new UnboundedChannelOptions
-            {
-                SingleReader = true,
-                SingleWriter = false,
-                AllowSynchronousContinuations = false,
-            }))
-            .ToArray();
+    }
+
+    /// <summary>A device's queue and the single task that drains it.</summary>
+    private sealed record Lane(Channel<Pending> Queue, Task Pump);
+
+    private Lane LaneFor(string key) =>
+        _lanes.GetOrAdd(key, static (id, self) => self.CreateLane(id), this);
+
+    private Lane CreateLane(string key)
+    {
+        var queue = Channel.CreateUnbounded<Pending>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false,
+        });
+        // Unbounded per lane because admission is counted globally in TryReserve; a second limit here
+        // could only reject a command the service has already told the caller it accepted.
+        return new Lane(queue, Task.Run(() => WorkerAsync(key, queue, _lifetime.Token)));
     }
 
     public async Task<ControlResult> ExecuteAsync(ControlCommand command, int? timeoutMs = null,
@@ -72,9 +104,7 @@ public sealed class ControlCommandService : BackgroundService
             return await RejectAdmissionAsync(pending, Volatile.Read(ref _accepting) == 0
                 ? "Command service is stopping." : "Command queue is full.");
 
-        var key = _engine.WritePartitionKey(command.TagId);
-        var partition = (int)((uint)StringComparer.Ordinal.GetHashCode(key) % (uint)_partitions.Length);
-        if (!_partitions[partition].Writer.TryWrite(pending))
+        if (!LaneFor(_engine.WritePartitionKey(command.TagId)).Queue.Writer.TryWrite(pending))
         {
             Interlocked.Decrement(ref _pendingCount);
             return await RejectAdmissionAsync(pending, "Command service is stopping.");
@@ -108,27 +138,57 @@ public sealed class ControlCommandService : BackgroundService
         }
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    /// <summary>
+    /// Nothing to drain here — every lane runs its own task — so this is the component's heartbeat.
+    /// It has to exist independently of the lanes: a gateway that has never been sent a command has
+    /// no lanes at all, and a health registry that hears nothing from a component eventually reports
+    /// it stale. "No commands yet" is not the same fact as "the command service is dead".
+    /// </summary>
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _health.Running("control-commands");
-        return Task.WhenAll(_partitions.Select((partition, index) => WorkerAsync(index, partition, stoppingToken)));
+        try
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
+                _health.Heartbeat("control-commands");
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         Interlocked.Exchange(ref _accepting, 0);
-        foreach (var partition in _partitions)
-            partition.Writer.TryComplete();
-        await base.StopAsync(cancellationToken);
+        foreach (var lane in _lanes.Values)
+            lane.Queue.Writer.TryComplete();
+        await base.StopAsync(cancellationToken).ConfigureAwait(false);
+
+        // Each lane's finally block completes whatever it had admitted, so the caller waiting on a
+        // command gets an answer rather than a hung request. Awaiting them is what makes that
+        // ordering hold: without it the process can exit while a lane is still draining.
+        _lifetime.Cancel();
+        foreach (var lane in _lanes.Values)
+        {
+            try { await lane.Pump.ConfigureAwait(false); }
+            catch (OperationCanceledException) { /* expected */ }
+        }
     }
 
-    private async Task WorkerAsync(int index, Channel<Pending> partition, CancellationToken stoppingToken)
+    public override void Dispose()
+    {
+        _lifetime.Dispose();
+        base.Dispose();
+    }
+
+    private async Task WorkerAsync(string key, Channel<Pending> lane, CancellationToken stoppingToken)
     {
         try
         {
-            while (await WaitForCommandAsync(partition.Reader, stoppingToken).ConfigureAwait(false))
+            while (await WaitForCommandAsync(lane.Reader, stoppingToken).ConfigureAwait(false))
             {
-                while (partition.Reader.TryRead(out var pending))
+                while (lane.Reader.TryRead(out var pending))
                 {
                     Interlocked.Decrement(ref _pendingCount);
                     await ExecuteOneAsync(pending, stoppingToken).ConfigureAwait(false);
@@ -139,14 +199,15 @@ public sealed class ControlCommandService : BackgroundService
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            Interlocked.Exchange(ref _accepting, 0);
-            foreach (var channel in _partitions) channel.Writer.TryComplete(ex);
+            // One lane failing is not grounds for refusing commands to every other device, but it is
+            // grounds for saying so: this lane's device can no longer be commanded until a restart.
             _health.Failed("control-commands", ex);
-            _logger.LogError(ex, "Command partition {Partition} stopped unexpectedly", index);
+            _logger.LogError(ex, "Command lane for {Device} stopped unexpectedly", key);
+            lane.Writer.TryComplete(ex);
         }
         finally
         {
-            while (partition.Reader.TryRead(out var pending))
+            while (lane.Reader.TryRead(out var pending))
             {
                 Interlocked.Decrement(ref _pendingCount);
                 var result = Complete(pending, ControlOutcome.Unknown,

@@ -297,12 +297,14 @@ Với một service, đặt biến ở mức máy để service đọc được:
 | --- | --- | --- |
 | `Data:Root` | `%ProgramData%\HinoGateway` (Windows/Production) | Thư mục trạng thái. **Bắt buộc là đường dẫn tuyệt đối** — đường dẫn tương đối làm gateway từ chối khởi động, vì nó sẽ phụ thuộc vào thư mục làm việc của tiến trình |
 | `Data:SeedDemo` | `false` | Production **không** tự tạo thiết bị demo khi thiếu `hino.json`; nó khởi động rỗng và ghi log cảnh báo |
-| `Kestrel:Endpoints:Http:Url` | `http://localhost:2000` | **Mặc định chỉ nghe loopback.** Muốn truy cập từ máy khác phải đổi thành `http://0.0.0.0:2000` hoặc IP cụ thể |
+| `Kestrel:Endpoints:Http:Url` | `http://localhost:2000` | **Mặc định chỉ nghe loopback.** Muốn truy cập từ máy khác thì đổi thành `http://0.0.0.0:2000`. **Tránh ghi IP cụ thể**: sau khi mất điện, IPC thường khởi động xong trước khi card mạng có địa chỉ, và bind vào một IP chưa tồn tại sẽ làm tiến trình thoát; `0.0.0.0` bind được kể cả khi chưa có địa chỉ nào |
 | `Security:Enabled` | `false` | Bật xác thực bằng API key |
 | `Security:RequireHttps` | `true` | Khi bật security mà không có endpoint HTTPS, gateway **từ chối khởi động** |
 | `Security:ApiKeys` | `[]` | Danh sách `{ Name, Key, Role }`, `Role` ∈ `Viewer` / `Operator` / `Admin` |
-| `Security:AllowLocalConsole` | `true` | Khi security **tắt**: request từ chính máy đó được quyền Admin, request từ nơi khác chỉ được `Viewer` |
-| `Commands:*` | 20/s, hàng đợi 256, 8 worker, timeout 10 s | Điều tiết lệnh điều khiển xuống thiết bị |
+| `Security:AllowLocalConsole` | `true` | Khi security **tắt**: request từ chính máy đó (loopback) được quyền Admin, request từ nơi khác chỉ được `Viewer`. **Đọc mục 7.4 nếu có reverse proxy** |
+| `Security:TrustedProxies` | `[]` | Danh sách IP của reverse proxy được tin (`127.0.0.1`, `::1`). **Bắt buộc khai nếu có proxy** — xem mục 7.4 |
+| `Security:TrustedNetworks` | `[]` | Như trên, dạng CIDR (`10.20.0.0/24`) |
+| `Commands:*` | 20/s, hàng đợi 256, timeout 10 s | Điều tiết lệnh điều khiển xuống thiết bị. Mỗi thiết bị có hàng đợi riêng; `Commands:WorkerCount` không còn tác dụng |
 | `Audit:*` | 90 ngày / 180 file / 2 GiB | Lưu giữ vết audit |
 | `Serilog:File:*` | 14 file / 32 MB | Xoay vòng log |
 
@@ -354,7 +356,85 @@ Ba điểm cần nhớ:
   (nginx dùng `$uri` chứ không phải `$request_uri`), coi log proxy như thông tin mật, và đổi khoá
   nếu log có query đã bị lộ.
 - `RequireHttps=false` chỉ chấp nhận được khi có reverse proxy tin cậy đã kết thúc TLS ngay trước
-  gateway.
+  gateway — và khi đó **phải khai `Security:TrustedProxies`**, xem mục 7.4.
+
+### 7.4 Reverse proxy — bắt buộc khai `TrustedProxies`
+
+Đặt IIS/nginx trước gateway (để kết thúc TLS hoặc gộp cổng) là cách triển khai bình thường, nhưng nó
+đổi một điều mà phần còn lại của cấu hình dựa vào: **mọi request đến Kestrel đều mang địa chỉ
+`127.0.0.1` của chính proxy đó**, chứ không phải địa chỉ người dùng.
+
+> ⚠ **Nếu proxy nằm trên cùng máy IPC và `Security:Enabled = false`, mọi người dùng từ LAN sẽ được
+> coi là console của máy đó và nhận quyền Admin — ghi tag, gửi lệnh xuống PLC, sửa cấu hình.** Audit
+> cũng sẽ ghi actor là `local-console` cho tất cả, mất khả năng truy vết.
+
+Gateway **không tin bất kỳ proxy nào theo mặc định** — kể cả loopback. Phải khai tường minh:
+
+```json
+"Security": {
+  "Enabled": true,
+  "RequireHttps": true,
+  "TrustedProxies": [ "127.0.0.1", "::1" ],
+  "ApiKeys": [ { "Name": "hmi", "Key": "<khoá>", "Role": "Operator" } ]
+}
+```
+
+Khai xong thì:
+
+- `X-Forwarded-For` của proxy được áp dụng, nên gateway thấy đúng IP người dùng → không còn bị nhầm
+  là console, không còn được Admin ẩn danh.
+- `X-Forwarded-Proto` được áp dụng, nên **`RequireHttps=true` vẫn dùng được** dù Kestrel chỉ nghe HTTP
+  sau proxy. Không còn phải tắt guard nữa.
+- Rate limiter và audit ghi đúng IP nguồn.
+
+Nếu **không** khai `TrustedProxies`, header `X-Forwarded-For` bị bỏ qua và sự có mặt của nó được coi là
+bằng chứng request đã qua một proxy lạ — request đó không bao giờ được quyền Admin. An toàn, nhưng
+người dùng hợp lệ cũng chỉ còn `Viewer`; vì thế hãy khai cho đúng.
+
+Gateway ghi cảnh báo lúc khởi động nếu phát hiện cấu hình rủi ro (security tắt + không chỉ nghe
+loopback + không khai proxy). Đọc log khởi động ở bước nghiệm thu.
+
+### 7.5 Ngân sách đĩa — tính trước khi chọn ổ
+
+Gateway tự giới hạn dung lượng của mọi thứ nó ghi, nhưng tổng các trần mặc định **không nhỏ**:
+
+| Mục | Khoá cấu hình | Trần mặc định |
+| --- | --- | --- |
+| Audit trail | `Audit:MaxTotalBytes` | 2,00 GB |
+| Historian | `History:MaxTotalBytes` | 2,00 GB |
+| Energy journal | `Energy:Journal:MaxTotalBytes` | 64 MB |
+| Log Serilog | `Serilog:File:*` (14 file × 32 MB) | 448 MB |
+| MQTT spool | `Mqtt:MaxSpoolBytes` | theo cấu hình MQTT |
+| **Tổng (chưa kể spool)** | | **~4,5 GB** |
+
+Trên IPC ổ 32 GB đã có Windows, hãy **kiểm tra dung lượng trống ở bước nghiệm thu** và hạ các trần
+nếu cần. Thực tế historian tiêu tốn ít hơn trần rất nhiều — khoảng 12 MB/tuần cho 32 tag — nên
+`History:RetentionDays` (mặc định 7) mới là ràng buộc thực sự; trần byte chỉ là lưới an toàn cho site
+500 tag.
+
+> **Từ 2026-08-18:** khi không ghi được một frame history (đĩa đầy, quyền ghi sai), gateway **báo
+> component `history-sampler` lỗi** thay vì âm thầm đếm rồi báo khoẻ. Theo dõi `/api/health/components`.
+
+### 7.6 MQTT — hai topic và ClientId
+
+- **`ClientId` mặc định giờ là `hino-{tên máy}`**, không còn là chuỗi cố định `hinogateway`. Hai
+  gateway cùng broker với cấu hình mặc định trước đây **chia sẻ chung một session bền** (client dùng
+  `CleanStart=false`): đá kết nối của nhau và message QoS 1 của máy này có thể giao cho máy kia. Nếu
+  project cũ còn ghi `hinogateway`, gateway coi như chưa đặt và ghi cảnh báo.
+- **Alarm giờ được đẩy northbound** trên topic riêng `Mqtt:AlarmTopic` (mặc định
+  `hinogateway/alarms`), qua một spool riêng trong `spool/alarms`. Alarm được ưu tiên gửi trước
+  telemetry, nên tồn đọng telemetry sau một đợt mất mạng không làm chậm bản tin báo sự cố.
+
+  Điều này quan trọng vì **nhật ký alarm trong gateway là ring buffer trong RAM** (2000 bản ghi):
+  nó không sống qua restart, và trước 2026-08-18 không có bản sao nào ở nơi khác. Muốn lưu lịch sử
+  alarm dài hạn thì **phải bật MQTT và ghi lại ở phía consumer**.
+
+### 7.7 Giới hạn quy mô project
+
+Gateway từ chối project vượt quá: **500 connection**, **50.000 tag**, **10.000 alarm**, hoặc **2.000
+lượt đọc/giây** cộng dồn trên mọi connection. Đây không phải giới hạn kiến trúc (engine đã đo
+100 connection × 100 tag trên 2 core) mà là chặn việc import nhầm file: mỗi connection chiếm một OS
+thread. Thông báo lỗi có kèm con số thực tế để nhận ra ngay là file sai.
 
 ---
 
@@ -429,13 +509,34 @@ Get-CimInstance Win32_Service -Filter "Name='HinoGateway'" | Select-Object State
 
 ### 8.3 Bắt Windows tự khởi động lại khi tiến trình chết
 
-Khi một device worker bị bỏ rơi, supervisor **thoát tiến trình với exit code 2** thay vì tạo worker
-trùng lặp — đúng để Service Control Manager khởi động lại một tiến trình sạch. Phải khai báo hành vi
-này, nếu không service sẽ nằm im ở trạng thái Stopped:
+**Bắt buộc với triển khai không người trực.** Thiếu bước này, gateway sẽ nằm im ở trạng thái Stopped
+sau sự cố đầu tiên.
 
 ```powershell
 sc.exe failure HinoGateway reset= 86400 actions= restart/5000/restart/10000/restart/30000
 sc.exe failureflag HinoGateway 1
+```
+
+Gateway kết thúc tiến trình (exit code 2) trong hai trường hợp, và cả hai đều để SCM dựng lại một
+tiến trình sạch:
+
+- **Device worker bị bỏ rơi** — luồng poll không dừng trong hạn, driver và socket vẫn bị giữ. Tạo
+  worker thứ hai lên cùng thiết bị còn tệ hơn, nên tiến trình tự kết thúc.
+- **Một vòng lặp nền chết vì exception.**
+
+> **Vì sao là "kết thúc tiến trình" chứ không phải "dừng host":** dừng host một cách sạch sẽ làm
+> service báo SERVICE_STOPPED với exit code 0, và `sc failure` **chỉ kích hoạt** khi exit code khác 0
+> hoặc khi tiến trình biến mất mà không báo dừng. Đặt `Environment.ExitCode` cũng không cứu được, vì
+> mã mà SCM ghi nhận lấy từ `ServiceBase.ExitCode` chứ không phải từ đó. Trước bản 2026-08-19, gateway
+> xin khởi động lại và **không ai nghe thấy** — nó nằm im tới khi có người ra site.
+
+**Kiểm chứng bước này khi nghiệm thu** (mục 10): dừng tiến trình bằng `Stop-Process -Force` rồi xem
+service có tự lên lại không.
+
+```powershell
+Stop-Process -Name HinoGateway.Server -Force
+Start-Sleep -Seconds 15
+Get-Service HinoGateway          # phải trở lại Running
 ```
 
 ### 8.4 Chạy thử bằng tay trước khi cài service (khuyến khích)
@@ -509,9 +610,20 @@ Chạy toàn bộ, ghi kết quả vào biên bản. Thay `<ip>` bằng địa c
 | 15 | Tự phục hồi | `Stop-Process -Name HinoGateway.Server -Force` | Service tự chạy lại trong ~5 s (nhờ mục 8.3) |
 | 16 | Bảo mật (nếu bật) | Gọi API **không** kèm `X-Api-Key` | Bị từ chối / chỉ đọc, đúng như thiết kế |
 | 17 | Ổn định | Để chạy ≥ 30 phút, xem lại bước 3, 4, 9 | Không suy giảm, RAM không tăng đều |
+| 18 | **Mất điện đột ngột** | Rút điện IPC khi gateway đang ghi (đang có lệnh/đang lưu cấu hình), cấp điện lại | Gateway tự lên, `hino.json` đọc được, làm lại bước 1–7 đạt |
+| 19 | **Mất mạng rồi có lại** | Rút dây mạng ≥ 5 phút rồi cắm lại | Thiết bị `Connected` lại, MQTT gửi hết spool tồn, IEC-104 nhận lại kết nối — **không cần khởi động lại service** |
+| 20 | Khôi phục từ bản lưu | Dừng service, làm hỏng `hino.json` (`"x" > hino.json`), chạy lại service | Service **vẫn lên**; log ghi `recovered from ...bak`; có file `hino.json.corrupt-*`; cấu hình còn nguyên |
 
 Bước 14 là bước hay bị bỏ qua nhất và cũng là bước hay lộ lỗi nhất (service chưa Automatic, thư mục
 dữ liệu nằm trên ổ mạng chưa mount kịp, UWF nuốt mất cấu hình).
+
+**Bước 18–20 là ba bước quyết định có được chạy không người trực hay không.** Bước 14 chỉ chứng minh
+gateway sống lại sau một lần tắt máy *sạch*; mất điện thật thì khác — nó cắt ngang giữa một lần ghi
+đĩa. Bước 19 chứng minh gateway không cần ai vào bấm nút sau một sự cố mạng, và bước 20 chứng minh
+lưới an toàn cuối cùng thật sự hoạt động **trên chính máy này**, không phải chỉ trong test.
+
+Sau bước 19, đối chiếu số liệu ở `/mqtt`: `spool pending` phải trở về 0 và `spool-drops` phải bằng 0
+— tức là dữ liệu trong lúc mất mạng được giữ lại rồi gửi bù, không phải bị vứt.
 
 ---
 
@@ -629,7 +741,10 @@ Remove-NetFirewallRule -DisplayName 'HinoGateway*'
 | Lệnh IEC-104 không có tác dụng | Thiếu `AllowCommands` ở trạm, IP nguồn không nằm trong CIDR, hoặc chưa làm SELECT trước EXECUTE (SBO) | Kiểm tra trang `/iec104`; SBO yêu cầu SELECT rồi EXECUTE trong 30 giây |
 | MQTT không gửi, spool phình to | Mất kết nối broker, sai thông tin đăng nhập, hoặc broker từ chối PUBLISH | Trang `/mqtt` xem `LastError`; kiểm tra bí mật đã nhập lại sau khi import chưa |
 | Thành phần `audit-trail` unhealthy | Ổ đĩa đầy hoặc thư mục dữ liệu không ghi được | Giải phóng dung lượng; kiểm tra quyền. Lệnh vẫn xuống thiết bị nhưng không được ghi vết |
-| Service dừng hẳn sau một sự cố, không tự lên lại | Chưa cấu hình `sc failure` | Chạy lệnh ở mục 8.3 (tiến trình thoát với exit code 2 khi cần khởi động lại) |
+| Service dừng hẳn sau một sự cố, không tự lên lại | Chưa cấu hình `sc failure` | Chạy lệnh ở mục 8.3, rồi kiểm chứng bằng `Stop-Process -Force` |
+| Log ghi `configuration was recovered from ...bak` | File `hino.json` hỏng (thường do mất điện lúc đang ghi); gateway đã tự lấy bản lưu kề bên | **Gateway đang chạy, nhưng lùi một lần lưu** — mọi thay đổi sau bản backup đó đã mất. Đối chiếu lại cấu hình. File hỏng được giữ ở `hino.json.corrupt-<thời điểm>` |
+| Log ghi `credentials were restored from the backup` | `hino.secrets.json` hỏng | Kiểm tra lại mật khẩu MQTT/PLC vừa đổi gần nhất — bản khôi phục có thể chưa có |
+| Gateway không khởi động, log ghi `The backup ... could not be used either` | Cả file chính lẫn `.bak` đều không đọc được | Nạp lại từ bản export `.hino` (mục 9), hoặc xoá `hino.json` để khởi động rỗng rồi import |
 | Cấu hình biến mất sau khi khởi động lại IPC | Unified Write Filter đang bật | Loại trừ `C:\ProgramData\HinoGateway` khỏi UWF |
 | Nhãn thời gian sai | Đồng hồ/múi giờ IPC sai | Đặt lại giờ, bật NTP, khởi động lại service |
 

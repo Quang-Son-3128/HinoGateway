@@ -25,7 +25,7 @@
                OnClick="ApplyAsync" Disabled="_busy">Apply to engine</MudButton>
 </div>
 
-<MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.65">
+<MudText Typo="Typo.body2" Class="mb-3 hino-dim">
     Each connection is one device/link the gateway polls. Tags are organised separately on the
     <MudLink Href="tags">Tag Database</MudLink> page, where every tag picks the connection it reads from.
 </MudText>
@@ -49,7 +49,7 @@
             <MudTd DataLabel="Status">
                 <span class="d-inline-flex align-center" style="gap:.4rem">
                     <span class="led @StateLed(h?.State)"></span>
-                    <span class="mono" style="font-size:.75rem;opacity:.8">@(h?.State.ToString().ToUpperInvariant() ?? "—")</span>
+                    <span class="mono txt-sm hino-dim">@(h?.State.ToString().ToUpperInvariant() ?? "—")</span>
                 </span>
             </MudTd>
             <MudTd DataLabel="Connection Id" Class="mono">@context.Id</MudTd>
@@ -57,7 +57,7 @@
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Primary">@context.Driver</MudChip>
             </MudTd>
             <MudTd DataLabel="Endpoint">
-                <span class="mono" style="font-size:.8rem;opacity:.75">@Endpoint(context)</span>
+                <span class="mono txt-sm hino-dim">@Endpoint(context)</span>
             </MudTd>
             <MudTd DataLabel="Scan" Style="text-align:right" Class="mono">@context.ScanIntervalMs</MudTd>
             <MudTd DataLabel="Tags" Style="text-align:right" Class="mono">@context.Tags.Count</MudTd>
@@ -65,12 +65,12 @@
                 @if (h is not null && !string.IsNullOrEmpty(h.LastError) && h.State != DeviceState.Connected)
                 {
                     <MudTooltip Text="@h.LastError">
-                        <span class="mono" style="color:var(--hino-bad);font-size:.8rem">@h.ErrorCount</span>
+                        <span class="mono txt-sm" style="color:var(--hino-bad)">@h.ErrorCount</span>
                     </MudTooltip>
                 }
                 else
                 {
-                    <span class="mono" style="opacity:.5;font-size:.8rem">@(h?.ErrorCount ?? 0)</span>
+                    <span class="mono txt-sm hino-muted">@(h?.ErrorCount ?? 0)</span>
                 }
             </MudTd>
             <MudTd DataLabel="Actions" Style="text-align:right">
@@ -78,13 +78,13 @@
                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" />
             </MudTd>
         </RowTemplate>
-        <NoRecordsContent><MudText Class="pa-4" Style="opacity:.5">No connections configured.</MudText></NoRecordsContent>
+        <NoRecordsContent><MudText Class="pa-4 hino-muted">No connections configured.</MudText></NoRecordsContent>
     </MudTable>
 </MudPaper>
 
 @if (_edit is not null)
 {
-    <MudPaper Class="pa-4 mb-6" Elevation="0" Outlined Style="border-left:3px solid var(--mud-palette-primary)">
+    <MudPaper Class="pa-4 mb-6 hino-panel-accent" Elevation="0" Outlined>
         <MudText Typo="Typo.h6" Class="mb-3">
             <MudIcon Icon="@(_isNew ? Icons.Material.Filled.Add : Icons.Material.Filled.Edit)" Size="Size.Small" Class="me-1" />
             @(_isNew ? "New connection" : $"Edit {_edit.Id}")
@@ -116,7 +116,7 @@
 
         @if (!string.IsNullOrWhiteSpace(descriptor.Description))
         {
-            <MudText Typo="Typo.body2" Class="mt-2" Style="opacity:.7">@descriptor.Description</MudText>
+            <MudText Typo="Typo.body2" Class="mt-2 hino-dim">@descriptor.Description</MudText>
         }
 
         <MudText Typo="Typo.subtitle2" Class="mt-4 mb-1">Settings</MudText>
@@ -139,7 +139,7 @@
         {
             <MudExpansionPanels Elevation="0" Class="mt-3" Dense>
                 <MudExpansionPanel Text="@($"Tuning ({advanced.Count} optional)")">
-                    <MudText Typo="Typo.caption" Class="d-block mb-2" Style="opacity:.6">
+                    <MudText Typo="Typo.caption" Class="d-block mb-2 hino-muted">
                         Left blank, each keeps the driver's default shown in the box.
                     </MudText>
                     <div class="d-flex flex-wrap align-start" style="gap:1rem">

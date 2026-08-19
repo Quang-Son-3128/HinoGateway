@@ -37,7 +37,12 @@ public sealed class RetainedValueStore : IRetainedValueStore, IDisposable
     private readonly object _writeGate = new();
     private readonly Timer _flushTimer;
     private int _flushScheduled;
+    private int _flushFailed;
     private bool _disposed;
+
+    /// <summary>How long to wait before trying a failed flush again. Long enough not to spin on a
+    /// full disk, short enough that a transient fault costs seconds rather than the next write.</summary>
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(30);
 
     /// <param name="path">The sidecar file, normally <c>hino.retain.json</c> beside the project.</param>
     /// <param name="debounce">
@@ -101,7 +106,12 @@ public sealed class RetainedValueStore : IRetainedValueStore, IDisposable
         {
             try
             {
-                DurableAtomicFile.WriteAllText(_path, JsonSerializer.Serialize(file, Json));
+                // The backup path was missing here while the project file and the energy baselines
+                // both had one, so this was the only durable state in the gateway with nothing to
+                // fall back on: a file truncated by a power cut mid-publish took every remembered
+                // setpoint with it.
+                DurableAtomicFile.WriteAllText(_path, JsonSerializer.Serialize(file, Json), _path + ".bak");
+                Interlocked.Exchange(ref _flushFailed, 0);
             }
             catch (Exception ex)
             {
@@ -110,33 +120,71 @@ public sealed class RetainedValueStore : IRetainedValueStore, IDisposable
                 // would misreport what actually happened. The log is the honest place for this.
                 _logger.LogError(ex, "Could not write retained tag values to {Path}; " +
                                      "they are live but will not survive a restart", _path);
+
+                // And retry, because the timer is only ever armed by a new write. A disk that was
+                // briefly full at the moment of the only write of the day would otherwise mean the
+                // values never reached the disk at all, with nothing further to trigger an attempt.
+                Interlocked.Exchange(ref _flushFailed, 1);
+                RetryLater();
             }
         }
     }
 
+    /// <summary>Re-arm the timer after a failed flush, without disturbing one already pending.</summary>
+    private void RetryLater()
+    {
+        if (_disposed)
+            return;
+        if (Interlocked.CompareExchange(ref _flushScheduled, 1, 0) == 0)
+        {
+            try { _flushTimer.Change(RetryDelay, Timeout.InfiniteTimeSpan); }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    /// <summary>
+    /// Read the file, and if it cannot be read, the <c>.bak</c> beside it.
+    ///
+    /// <para>
+    /// Writing a backup is only half of the arrangement — the half that was here. A file that
+    /// survives a power cut but is never read on the way back is a file that does nothing, and the
+    /// one moment it matters is the one moment nobody is watching.
+    /// </para>
+    /// </summary>
     private void Load()
     {
-        if (!File.Exists(_path))
+        if (TryLoad(_path, primary: true))
             return;
+        if (File.Exists(_path + ".bak") && TryLoad(_path + ".bak", primary: false))
+            _logger.LogWarning("Retained tag values were restored from the backup {Path}.bak; " +
+                               "the primary file was unusable", _path);
+    }
+
+    private bool TryLoad(string path, bool primary)
+    {
+        if (!File.Exists(path))
+            return false;
 
         try
         {
-            var file = JsonSerializer.Deserialize<RetainedFile>(File.ReadAllText(_path), Json);
+            var file = JsonSerializer.Deserialize<RetainedFile>(File.ReadAllText(path), Json);
             if (file is null || !string.Equals(file.Format, FormatTag, StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogWarning("{Path} is not a retained-values file; ignoring it", _path);
-                return;
+                _logger.LogWarning("{Path} is not a retained-values file; ignoring it", path);
+                return false;
             }
 
             foreach (var (tagId, value) in file.Values)
                 _values[tagId] = Unwrap(value);
 
-            _logger.LogInformation("Restored {Count} retained tag value(s) from {Path}", _values.Count, _path);
+            _logger.LogInformation("Restored {Count} retained tag value(s) from {Path}", _values.Count, path);
+            return true;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not read retained tag values from {Path}; " +
-                                   "those tags will start from their initial values", _path);
+            _logger.Log(primary ? LogLevel.Warning : LogLevel.Error, ex,
+                "Could not read retained tag values from {Path}", path);
+            return false;
         }
     }
 

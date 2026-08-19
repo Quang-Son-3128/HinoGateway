@@ -50,6 +50,13 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
     /// <summary>True only when no project file existed before this process started.</summary>
     public bool WasMissingAtStartup { get; }
 
+    /// <summary>
+    /// Set when the primary file could not be read and the configuration came from the <c>.bak</c>
+    /// instead. Surfaced so an operator finds out from the gateway rather than from a log nobody
+    /// opened: the gateway is running, but on a configuration one save older than the last one made.
+    /// </summary>
+    public string? RecoveredFromBackup { get; private set; }
+
     /// <summary>True when the file did not exist at startup (a fresh install to be seeded).</summary>
     public bool IsEmpty
     {
@@ -58,6 +65,24 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
 
     // --- loading / saving ----------------------------------------------------
 
+    /// <summary>
+    /// Read the project file, and if it cannot be read, the <c>.bak</c> that every save has been
+    /// leaving beside it.
+    ///
+    /// <para>
+    /// Every save has written a backup since this class existed, and nothing ever read one. The error
+    /// message on the failure path even told the operator to go and look for it by hand — which is a
+    /// reasonable instruction for a workstation and the wrong one for an unattended IPC, because the
+    /// one moment the backup matters is the moment nobody is on site. A gateway that will not start
+    /// until someone drives out to it is down for hours, not seconds.
+    /// </para>
+    ///
+    /// <para>
+    /// Both files unreadable is still fatal, and deliberately so: starting with an empty configuration
+    /// would take a live gateway off the air and then overwrite the operator's file with the nothing
+    /// it had invented. Refusing to start keeps the evidence and keeps the outage legible.
+    /// </para>
+    /// </summary>
     private void Load()
     {
         if (!File.Exists(_path))
@@ -66,9 +91,37 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
             return;
         }
 
+        if (TryLoad(_path, primary: true, out var primaryFailure))
+            return;
+
+        var backup = _path + ".bak";
+        if (File.Exists(backup) && TryLoad(backup, primary: false, out _))
+        {
+            RecoveredFromBackup = backup;
+            _logger.LogCritical(
+                "The project file {Path} was unusable and the configuration was recovered from {Backup}. " +
+                "The gateway is running one save behind: any change made after that backup was written " +
+                "is gone. Review the configuration before trusting it",
+                _path, backup);
+            QuarantineUnreadablePrimary();
+            return;
+        }
+
+        // The primary failure is what the operator needs to read — "project version 9 is newer than
+        // this gateway supports" says what to do, where "could not be read" says only that something
+        // is wrong. The backup is a footnote to it, not a replacement for it.
+        throw new InvalidOperationException(
+            $"Could not load the project file '{_path}': {primaryFailure?.Message} " +
+            $"The backup '{backup}' could not be used either. Restore a .hino export, or remove the " +
+            "file to start with an empty configuration.", primaryFailure);
+    }
+
+    private bool TryLoad(string path, bool primary, out Exception? failure)
+    {
+        failure = null;
         try
         {
-            var project = JsonSerializer.Deserialize<HinoProject>(File.ReadAllText(_path), Json);
+            var project = JsonSerializer.Deserialize<HinoProject>(File.ReadAllText(path), Json);
             if (project is null)
                 throw new InvalidDataException("The project file is empty.");
             if (!string.Equals(project.Format, HinoProject.FormatTag, StringComparison.OrdinalIgnoreCase))
@@ -77,23 +130,94 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
                 throw new InvalidDataException(
                     $"Project version {project.Version} is newer than this gateway supports ({HinoProject.CurrentVersion}).");
 
-            Normalise(project);
+            Normalise(project, out var migrationNotes);
+            foreach (var note in migrationNotes)
+                _logger.LogWarning("Project migration: {Note}", note);
             _project = project;
             _logger.LogInformation(
                 "Loaded configuration from {Path}: {Devices} connection(s), {Groups} folder(s), {Tags} tag(s), {Alarms} alarm(s)",
-                _path, project.Devices.Count, project.Groups.Count, project.Tags.Count, project.Alarms.Count);
+                path, project.Devices.Count, project.Groups.Count, project.Tags.Count, project.Alarms.Count);
+            return true;
         }
         catch (Exception ex)
         {
-            // Refuse to run on a configuration we cannot understand: silently starting with an empty
-            // one would take a live gateway off the air and then overwrite the operator's file.
-            throw new InvalidOperationException(
-                $"Could not load the project file '{_path}': {ex.Message}. Fix or remove the file (a previous version may be in '{_path}.bak').", ex);
+            failure = ex;
+            _logger.Log(primary ? LogLevel.Warning : LogLevel.Error, ex,
+                "Could not load the project file {Path}", path);
+            return false;
         }
     }
 
+    /// <summary>
+    /// Move the unreadable primary aside after recovering from the backup.
+    ///
+    /// <para>
+    /// Without this the next save would destroy the copy that just rescued the gateway:
+    /// <see cref="DurableAtomicFile"/> publishes by replacing the primary and moving the file it
+    /// displaced into the <c>.bak</c> slot — so the corrupt primary would overwrite the good backup
+    /// on the very first configuration change. Renaming it leaves no primary to displace, keeps the
+    /// good backup where it is, and preserves the damaged bytes for whoever has to explain them.
+    /// </para>
+    /// </summary>
+    private void QuarantineUnreadablePrimary()
+    {
+        var quarantine = $"{_path}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+        try
+        {
+            File.Move(_path, quarantine);
+            _logger.LogWarning("The unreadable project file was preserved as {Path}", quarantine);
+        }
+        catch (Exception ex)
+        {
+            // Best effort. Failing startup over the rename would undo the recovery it is protecting.
+            _logger.LogError(ex,
+                "Could not move the unreadable project file aside; the next configuration save will " +
+                "overwrite the backup it was just recovered from");
+        }
+    }
+
+    /// <summary>
+    /// Replace the in-memory project with whatever the file actually contains, after a write that
+    /// did not land. A missing file means the very first save failed, and the honest state for that
+    /// is an empty project — not the change the caller was told had been rejected.
+    /// </summary>
+    private void RevertToDisk()
+    {
+        if (!File.Exists(_path))
+        {
+            lock (_gate)
+                _project = new HinoProject();
+            return;
+        }
+
+        var project = JsonSerializer.Deserialize<HinoProject>(File.ReadAllText(_path), Json)
+                      ?? throw new InvalidDataException("The project file is empty.");
+        Normalise(project);
+        lock (_gate)
+            _project = project;
+    }
+
     /// <summary>Version 1 files nested tags under their device; lift them into one folder per device.</summary>
-    public static void Normalise(HinoProject project)
+    public static void Normalise(HinoProject project) => Normalise(project, out _);
+
+    /// <summary>
+    /// The same, reporting what the upgrade changed about the project's control surface.
+    ///
+    /// <para>
+    /// The notes are not decoration. The version 7 step below carries a tag's authority to be
+    /// commanded across from the old format, which is the only correct reading of a version 6 file
+    /// — but it means a restore can end with writable points that whoever performs it never chose,
+    /// and had no way to see. Naming them is what turns that into a decision.
+    /// </para>
+    /// </summary>
+    public static void Normalise(HinoProject project, out IReadOnlyList<string> notes)
+    {
+        var collected = new List<string>();
+        notes = collected;
+        NormaliseCore(project, collected);
+    }
+
+    private static void NormaliseCore(HinoProject project, List<string> notes)
     {
         project.Devices ??= new();
         project.Groups ??= new();
@@ -136,8 +260,16 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
                 if (!string.IsNullOrEmpty(point.TagId))
                     commandedTagIds.Add(point.TagId);
             }
-            foreach (var tag in project.Tags.Where(t => commandedTagIds.Contains(t.Id)))
+            var enabled = project.Tags.Where(t => commandedTagIds.Contains(t.Id) && !t.AllowWrite).ToList();
+            foreach (var tag in enabled)
                 tag.AllowWrite = true;
+
+            if (enabled.Count > 0)
+                notes.Add(
+                    $"Upgrading from project version {project.Version} kept the write permission that " +
+                    $"{enabled.Count} tag(s) already had as IEC command points, because in that format " +
+                    "mapping a point as commandable was the permission. Review each one before applying: " +
+                    string.Join(", ", enabled.Select(t => t.Name ?? t.Id).OrderBy(n => n, StringComparer.Ordinal)));
         }
 
         // Version 8 added accumulator tags. Nothing to convert — a version 7 file has no tag of that
@@ -241,12 +373,30 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
         }
         catch (Exception ex)
         {
-            // The in-memory configuration stays authoritative and the gateway keeps polling; the
-            // request must still fail: returning success here tells the operator that a change is
-            // durable when it will disappear at the next restart.
-            _logger.LogError(ex, "Could not write the project file {Path} — the change is live but NOT persisted", _path);
+            // The write is atomic, so the file still holds the last good configuration. Re-reading it
+            // puts memory back in step with the disk, which is the whole point: the request used to
+            // fail while the change stayed live in memory, so every subsequent GET showed a
+            // configuration that a restart would silently undo — and an operator who retried, saw
+            // their change, and walked away had no way to know it was never saved.
+            //
+            // Done here rather than in the transaction scope because the non-transactional mutators
+            // have the same problem: each one edits the project and then asks for a save.
+            _logger.LogError(ex, "Could not write the project file {Path} — reverting the in-memory copy", _path);
+            try
+            {
+                RevertToDisk();
+            }
+            catch (Exception revert)
+            {
+                // Now both the write and the read back have failed. Say so plainly and leave memory
+                // alone; the exception below is still what the caller acts on.
+                _logger.LogCritical(revert,
+                    "Could not re-read {Path} after a failed write — the in-memory configuration may " +
+                    "differ from the file on disk until this gateway is restarted", _path);
+            }
+
             throw new ConfigurationPersistenceException(_path,
-                $"Could not persist the gateway project to '{_path}'. The change is live in memory but will not survive a restart.", ex);
+                $"Could not persist the gateway project to '{_path}'. The change has been rolled back.", ex);
         }
     }
 

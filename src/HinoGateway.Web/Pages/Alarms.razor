@@ -41,7 +41,7 @@
     <div class="kpi kpi-accent">
         <div class="kpi-label">Configured</div>
         <div class="kpi-value">@_summary.Configured</div>
-        <div class="kpi-sub"><MudLink Href="alarm-rules" Class="mono" Style="font-size:.7rem">edit rules →</MudLink></div>
+        <div class="kpi-sub"><MudLink Href="alarm-rules" Class="mono txt-xs">edit rules →</MudLink></div>
     </div>
     @foreach (var sc in _summary.ActiveBySeverity)
     {
@@ -60,7 +60,7 @@
             <div class="alarm-empty">
                 <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Style="color:var(--hino-good);font-size:2rem" />
                 <MudText Typo="Typo.subtitle1">No outstanding alarms</MudText>
-                <MudText Typo="Typo.caption" Style="opacity:.6">Every configured alarm is in the Normal state.</MudText>
+                <MudText Typo="Typo.caption" Class="hino-muted">Every configured alarm is in the Normal state.</MudText>
             </div>
         }
         else
@@ -90,31 +90,31 @@
                         <div style="font-weight:600">@context.Name</div>
                         @if (!string.IsNullOrEmpty(context.Message))
                         {
-                            <div style="opacity:.6;font-size:.78rem">@context.Message</div>
+                            <div class="txt-sm hino-muted">@context.Message</div>
                         }
                     </MudTd>
                     <MudTd DataLabel="Tag">
-                        <MudLink Href="@($"tags?select={Uri.EscapeDataString(context.TagId)}")" Class="mono" Style="font-size:.8rem">
+                        <MudLink Href="@($"tags?select={Uri.EscapeDataString(context.TagId)}")" Class="mono txt-sm">
                             @context.TagId
                         </MudLink>
                     </MudTd>
-                    <MudTd DataLabel="Condition"><span class="mono" style="font-size:.8rem">@ConditionText(context.Condition)</span></MudTd>
+                    <MudTd DataLabel="Condition"><span class="mono txt-sm">@ConditionText(context.Condition)</span></MudTd>
                     <MudTd DataLabel="Limit" Style="text-align:right">
-                        <span class="mono" style="font-size:.8rem;opacity:.8">@(IsLevel(context.Condition) ? context.Limit.ToString("0.###") : "—")</span>
+                        <span class="mono txt-sm hino-dim">@(IsLevel(context.Condition) ? context.Limit.ToString("0.###") : "—")</span>
                     </MudTd>
                     <MudTd DataLabel="Value" Style="text-align:right"><span class="tag-value">@FormatValue(context.Value)</span></MudTd>
                     <MudTd DataLabel="Status">
-                        <span class="mono" style="font-size:.76rem;color:@StatusColor(context.Status)">@StatusText(context.Status)</span>
+                        <span class="mono txt-sm" style="color:@StatusColor(context.Status)">@StatusText(context.Status)</span>
                         @if (context.AckedAt is not null)
                         {
-                            <div style="opacity:.55;font-size:.7rem">by @(context.AckedBy ?? "operator")</div>
+                            <div class="txt-xs hino-muted">by @(context.AckedBy ?? "operator")</div>
                         }
                     </MudTd>
                     <MudTd DataLabel="Since" Style="text-align:right">
-                        <span class="mono" style="font-size:.78rem;opacity:.7">@FormatTime(context.ActiveSince)</span>
+                        <span class="mono txt-sm hino-dim">@FormatTime(context.ActiveSince)</span>
                     </MudTd>
                     <MudTd DataLabel="Duration" Style="text-align:right">
-                        <span class="mono" style="font-size:.78rem">@Duration(context)</span>
+                        <span class="mono txt-sm">@Duration(context)</span>
                     </MudTd>
                     <MudTd Style="text-align:right">
                         @if (context.Status is AlarmStatus.Active or AlarmStatus.ClearedUnacknowledged)
@@ -130,7 +130,7 @@
 
     <MudTabPanel Text="History" Icon="@Icons.Material.Filled.History">
         <MudToolBar Dense Class="px-3" Style="gap:.6rem">
-            <MudIcon Icon="@Icons.Material.Filled.FilterAlt" Size="Size.Small" Style="opacity:.6" />
+            <MudIcon Icon="@Icons.Material.Filled.FilterAlt" Size="Size.Small" Class="hino-muted" />
             <MudSelect T="int" @bind-Value="_historyHours" @bind-Value:after="LoadHistoryAsync" Dense
                        Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:11rem" Label="Range">
                 <MudSelectItem Value="1">Last hour</MudSelectItem>
@@ -144,7 +144,7 @@
                           AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Small"
                           Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:16rem" />
             <MudSpacer />
-            <MudText Typo="Typo.caption" Class="mono" Style="opacity:.5">@HistoryView.Count / @_history.Count lines</MudText>
+            <MudText Typo="Typo.caption" Class="mono hino-muted">@HistoryView.Count / @_history.Count lines</MudText>
             <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="LoadHistoryAsync" />
         </MudToolBar>
         <MudTable Items="HistoryView" Dense Hover Elevation="0" Breakpoint="Breakpoint.Sm"
@@ -161,7 +161,7 @@
             </HeaderContent>
             <RowTemplate>
                 <MudTd Style="text-align:right">
-                    <span class="mono" style="font-size:.78rem;opacity:.75">@context.Timestamp.ToLocalTime().ToString("dd/MM HH:mm:ss")</span>
+                    <span class="mono txt-sm hino-dim">@context.Timestamp.ToLocalTime().ToString("dd/MM HH:mm:ss")</span>
                 </MudTd>
                 <MudTd DataLabel="Event">
                     <span class="evt-badge" style="color:@EventColor(context.Type);border-color:@EventColor(context.Type)">
@@ -169,15 +169,15 @@
                     </span>
                 </MudTd>
                 <MudTd DataLabel="Severity">
-                    <span class="mono" style="font-size:.74rem;color:@SeverityColor(context.Severity)">@context.Severity.ToString().ToUpperInvariant()</span>
+                    <span class="mono txt-sm" style="color:@SeverityColor(context.Severity)">@context.Severity.ToString().ToUpperInvariant()</span>
                 </MudTd>
                 <MudTd DataLabel="Alarm">@context.Name</MudTd>
-                <MudTd DataLabel="Tag"><span class="mono" style="font-size:.78rem;opacity:.75">@context.TagId</span></MudTd>
+                <MudTd DataLabel="Tag"><span class="mono txt-sm hino-dim">@context.TagId</span></MudTd>
                 <MudTd DataLabel="Value" Style="text-align:right">
-                    <span class="mono" style="font-size:.8rem">@(context.Value is null ? "—" : context.Value.Value.ToString("0.###"))</span>
+                    <span class="mono txt-sm">@(context.Value is null ? "—" : context.Value.Value.ToString("0.###"))</span>
                 </MudTd>
-                <MudTd DataLabel="Message" Style="opacity:.7;font-size:.85rem">@context.Message</MudTd>
-                <MudTd DataLabel="Operator"><span class="mono" style="font-size:.78rem;opacity:.7">@context.User</span></MudTd>
+                <MudTd DataLabel="Message" Class="txt-sm hino-dim">@context.Message</MudTd>
+                <MudTd DataLabel="Operator"><span class="mono txt-sm hino-dim">@context.User</span></MudTd>
             </RowTemplate>
         </MudTable>
     </MudTabPanel>

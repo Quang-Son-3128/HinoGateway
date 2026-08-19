@@ -362,6 +362,63 @@ public class JsonProjectStoreTests : IDisposable
         Assert.False(project.Tags.Single(t => t.Id == "t-readonly").AllowWrite);
     }
 
+    /// <summary>
+    /// Carrying the permission across is correct, but doing it quietly is not: whoever restores an
+    /// old backup has to be told which points came back writable, by name, or the review the README
+    /// asks for cannot actually be performed.
+    /// </summary>
+    [Fact]
+    public void Every_tag_the_upgrade_makes_writable_is_named_in_a_migration_note()
+    {
+        var project = new HinoProject
+        {
+            Version = 6,
+            Tags =
+            [
+                new TagDto { Id = "t-breaker", Name = "Breaker 271" },
+                new TagDto { Id = "t-setpoint", Name = "Setpoint P" },
+                new TagDto { Id = "t-readonly", Name = "Reading" },
+            ],
+            Iec104 = new Iec104ServerOptions
+            {
+                Points =
+                [
+                    new Iec104PointDto { Ioa = 1, TagId = "t-breaker", Command = Iec104CommandType.DoubleCommand },
+                    new Iec104PointDto { Ioa = 2, TagId = "t-setpoint", Command = Iec104CommandType.SetpointShort },
+                    new Iec104PointDto { Ioa = 3, TagId = "t-readonly", Command = Iec104CommandType.None },
+                ],
+            },
+        };
+
+        JsonProjectStore.Normalise(project, out var notes);
+
+        var note = Assert.Single(notes);
+        Assert.Contains("Breaker 271", note);
+        Assert.Contains("Setpoint P", note);
+        Assert.DoesNotContain("Reading", note);
+        Assert.Contains("2 tag(s)", note);
+    }
+
+    /// <summary>Nothing changed means nothing to warn about; a note on every load would stop being read.</summary>
+    [Fact]
+    public void An_upgrade_that_changes_no_permission_says_nothing()
+    {
+        var project = new HinoProject
+        {
+            Version = 6,
+            Tags = [new TagDto { Id = "t-breaker", Name = "Breaker", AllowWrite = true }],
+            Iec104 = new Iec104ServerOptions
+            {
+                Points = [new Iec104PointDto { Ioa = 1, TagId = "t-breaker", Command = Iec104CommandType.DoubleCommand }],
+            },
+        };
+
+        JsonProjectStore.Normalise(project, out var notes);
+
+        Assert.Empty(notes);
+        Assert.True(project.Tags.Single().AllowWrite);
+    }
+
     /// <summary>A project already at the current version must not have its safety switches touched.</summary>
     [Fact]
     public void Current_version_projects_keep_their_write_switches_as_configured()

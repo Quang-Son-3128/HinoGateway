@@ -27,7 +27,17 @@ public sealed class MqttPublisherOptions
     /// </summary>
     public bool UseTls { get; set; }
 
-    public string ClientId { get; set; } = "hinogateway";
+    /// <summary>
+    /// Broker-side identity. Left empty, the gateway uses <c>hino-{machine name}</c>.
+    ///
+    /// <para>
+    /// It used to default to the literal <c>hinogateway</c>, which meant two gateways out of the box
+    /// claimed the same persistent session on one broker — they fought over the connection and could
+    /// be handed each other's queued messages. Empty is now the default, and the old literal is
+    /// treated as unset with a warning.
+    /// </para>
+    /// </summary>
+    public string ClientId { get; set; } = "";
 
     public string? Username { get; set; }
 
@@ -39,6 +49,19 @@ public sealed class MqttPublisherOptions
 
     /// <summary>Topic the batches are published to. MQTT wildcards are refused by validation.</summary>
     public string PublishTopic { get; set; } = "hinogateway/telemetry";
+
+    /// <summary>
+    /// Where alarm events are published. Its own topic, and its own spool behind it, because the two
+    /// streams are wanted by different consumers and have different urgency: a backlog of telemetry
+    /// must not delay the message that says a breaker tripped.
+    ///
+    /// <para>
+    /// This is what makes the local alarm trail's design honest. That trail is deliberately a bounded
+    /// ring in memory, on the grounds that the durable record belongs upstream — but until alarms
+    /// were actually forwarded there was no upstream record, so a restart simply lost them.
+    /// </para>
+    /// </summary>
+    public string AlarmTopic { get; set; } = "hinogateway/alarms";
 
     /// <summary>0, 1 or 2.</summary>
     public int QoS { get; set; } = 1;

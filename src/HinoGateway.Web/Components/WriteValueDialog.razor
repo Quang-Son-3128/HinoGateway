@@ -15,18 +15,18 @@
         <MudSimpleTable Dense Elevation="0" Style="background:transparent">
             <tbody>
                 <tr>
-                    <td style="opacity:.6">Tag</td>
+                    <td class="hino-muted">Tag</td>
                     <td class="mono">@TagId</td>
                 </tr>
                 @if (!string.IsNullOrEmpty(Name))
                 {
                     <tr>
-                        <td style="opacity:.6">Name</td>
+                        <td class="hino-muted">Name</td>
                         <td>@Name</td>
                     </tr>
                 }
                 <tr>
-                    <td style="opacity:.6">Current</td>
+                    <td class="hino-muted">Current</td>
                     <td class="mono">@(string.IsNullOrEmpty(CurrentValue) ? "—" : CurrentValue) @Unit</td>
                 </tr>
             </tbody>
@@ -43,7 +43,7 @@
             <MudAlert Severity="Severity.Error" Dense Class="mt-3">@_error</MudAlert>
         }
 
-        <MudText Typo="Typo.caption" Class="d-block mt-3" Style="opacity:.6">
+        <MudText Typo="Typo.caption" Class="d-block mt-3 hino-muted">
             This writes to the physical device (holding register / coil). Read-only points are rejected.
         </MudText>
     </DialogContent>

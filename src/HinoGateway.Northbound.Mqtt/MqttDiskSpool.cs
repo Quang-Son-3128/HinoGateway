@@ -42,9 +42,18 @@ public sealed class MqttDiskSpool : IMqttDiskSpool
     private long _bytes;
     private long _indexedCount;
 
+    // Damage found while recovering, as distinct from _dropped, which counts records the spool threw
+    // away on purpose to stay inside its size limit. Conflating the two would hide the one that means
+    // something is wrong with the disk.
+    private long _corruptRecords;
+    private long _corruptBytes;
+
+    private readonly Action<string>? _logger;
+
     public MqttDiskSpool(string directory, long maxBytes, int maxSegmentFiles = DefaultMaxSegmentFiles,
-        long segmentTargetBytes = DefaultSegmentBytes)
+        long segmentTargetBytes = DefaultSegmentBytes, Action<string>? logger = null)
     {
+        _logger = logger;
         _directory = Path.GetFullPath(directory);
         _maxBytes = Math.Max(1024 * 1024, maxBytes);
         _maxSegmentFiles = Math.Clamp(maxSegmentFiles, 2, 100_000);
@@ -64,6 +73,12 @@ public sealed class MqttDiskSpool : IMqttDiskSpool
     }
 
     public long Dropped => Interlocked.Read(ref _dropped);
+
+    /// <summary>Records lost to a failed checksum or an unreadable header since this spool opened.</summary>
+    public long CorruptRecords => Interlocked.Read(ref _corruptRecords);
+
+    /// <summary>Bytes discarded as unreadable, including the tails that could not be resynchronised.</summary>
+    public long CorruptBytes => Interlocked.Read(ref _corruptBytes);
 
     public async Task EnqueueAsync(byte[] payload, CancellationToken ct)
     {
@@ -259,15 +274,23 @@ public sealed class MqttDiskSpool : IMqttDiskSpool
                    64 * 1024, FileOptions.SequentialScan))
         {
             var header = new byte[HeaderSize];
+            var corruptRecords = 0;
             while (stream.Position + HeaderSize <= stream.Length)
             {
                 var recordOffset = stream.Position;
                 stream.ReadExactly(header);
                 var payloadLength = BinaryPrimitives.ReadInt32LittleEndian(header);
                 var expectedChecksum = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(sizeof(int)));
+
+                // An unusable length is unrecoverable: the format is length-prefixed, so without a
+                // trustworthy length there is no way to find where the next record starts. Everything
+                // from here on is lost whether it is intact or not.
                 if (payloadLength < 0 || payloadLength > MaxRecordBytes || stream.Position + payloadLength > stream.Length)
                 {
-                    TruncateTornTail(stream, recordOffset);
+                    Discard(stream, path, recordOffset,
+                        recordOffset + HeaderSize >= stream.Length
+                            ? null                                    // the ordinary torn tail
+                            : $"record header at offset {recordOffset} is unreadable (length {payloadLength})");
                     break;
                 }
 
@@ -275,14 +298,27 @@ public sealed class MqttDiskSpool : IMqttDiskSpool
                 stream.ReadExactly(payload);
                 if (Checksum(payload) != expectedChecksum)
                 {
-                    TruncateTornTail(stream, recordOffset);
-                    break;
+                    // A bad checksum with a good length is different, and it used to be treated the
+                    // same: the loop stopped and the rest of the segment was cut off. One flipped bit
+                    // near the start of an 8 MB segment therefore destroyed every intact record
+                    // behind it, silently. The length tells us exactly where this record ends, so
+                    // skip past just this one and keep reading.
+                    corruptRecords++;
+                    _corruptRecords++;
+                    _corruptBytes += HeaderSize + payloadLength;
+                    continue;
                 }
                 parsed.Add(new RecordIndex(path, recordOffset, recordOffset + HeaderSize,
                     payloadLength, stream.Position, Legacy: false));
             }
             if (stream.Position != stream.Length)
-                TruncateTornTail(stream, stream.Position);
+                Discard(stream, path, stream.Position, null);
+
+            if (corruptRecords > 0)
+                _logger?.Invoke(
+                    $"MQTT spool: {corruptRecords} record(s) in '{Path.GetFileName(path)}' failed their " +
+                    "checksum and were skipped. The messages they held are lost; the rest of the segment " +
+                    "was kept.");
             length = stream.Length;
         }
 
@@ -310,11 +346,75 @@ public sealed class MqttDiskSpool : IMqttDiskSpool
         _bytes += length;
     }
 
-    private static void TruncateTornTail(FileStream stream, long goodLength)
+    /// <summary>
+    /// Cut the file back to <paramref name="goodLength"/>, keeping a copy of what was cut.
+    ///
+    /// <para>
+    /// Two things happen here that did not before. The bytes are counted and reported, because
+    /// "delivery survives a power cut" is a promise this spool makes and the moment it cannot keep
+    /// it is exactly the moment worth knowing about — the old code was three lines that set the
+    /// length and flushed, with no log, no counter and nothing to look at afterwards. And when the
+    /// cut is not an ordinary torn tail, the discarded bytes are copied into <c>quarantine/</c>
+    /// first: a segment that fails to parse is the only evidence of whatever damaged it, and
+    /// deleting it in place makes the fault unreproducible.
+    /// </para>
+    ///
+    /// <param name="reason">
+    /// Null for a torn tail — a record half-written when the power went, which is expected and costs
+    /// at most the batch in flight. Anything else is real corruption and is logged as an error.
+    /// </param>
+    /// </summary>
+    private void Discard(FileStream stream, string path, long goodLength, string? reason)
     {
+        var lost = stream.Length - goodLength;
+        if (lost <= 0)
+            return;
+
+        if (reason is not null)
+        {
+            Quarantine(stream, path, goodLength, lost);
+            _corruptBytes += lost;
+            _logger?.Invoke(
+                $"MQTT spool: {reason}. {lost} byte(s) at the end of '{Path.GetFileName(path)}' could not " +
+                "be read and were discarded; a copy is in the spool's quarantine folder.");
+        }
+
         stream.SetLength(goodLength);
         stream.Position = goodLength;
         stream.Flush(flushToDisk: true);
+    }
+
+    private void Quarantine(FileStream stream, string path, long from, long length)
+    {
+        try
+        {
+            var directory = Path.Combine(_directory, "quarantine");
+            Directory.CreateDirectory(directory);
+            var target = Path.Combine(directory,
+                $"{Path.GetFileNameWithoutExtension(path)}-{DateTime.UtcNow:yyyyMMddHHmmss}.bad");
+
+            var position = stream.Position;
+            stream.Position = from;
+            var buffer = new byte[Math.Min(length, MaxRecordBytes)];
+            using (var output = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                var remaining = length;
+                while (remaining > 0)
+                {
+                    var read = stream.Read(buffer, 0, (int)Math.Min(remaining, buffer.Length));
+                    if (read <= 0) break;
+                    output.Write(buffer, 0, read);
+                    remaining -= read;
+                }
+            }
+            stream.Position = position;
+        }
+        catch (Exception ex)
+        {
+            // Forensics are worth less than recovery: if the copy cannot be made, the truncation
+            // still has to happen or the spool will fail to open on every restart.
+            _logger?.Invoke($"MQTT spool: could not quarantine the damaged tail of '{path}': {ex.Message}");
+        }
     }
 
     private long ReadCheckpoint(string segmentPath)

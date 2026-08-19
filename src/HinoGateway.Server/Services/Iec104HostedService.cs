@@ -81,8 +81,13 @@ public sealed class Iec104HostedService : IHostedService
                 return CurrentStatus();
             }
 
+            // The engine resolves a tag path to the device behind it, which is what decides whether
+            // two commands share a physical link and therefore a queue. Without this the station
+            // would serialise per point, which is correct but parallelises more finely than the
+            // wire allows and would let two commands race towards one PLC's driver lock.
             var server = new Iec104Server(_options, _engine.Tags, WriteTagAsync,
-                _loggerFactory.CreateLogger<Iec104Server>(), AuditAsync, ObserveLoop);
+                _loggerFactory.CreateLogger<Iec104Server>(), AuditAsync, ObserveLoop,
+                _engine.WritePartitionKey);
             try
             {
                 server.Start();

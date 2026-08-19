@@ -68,6 +68,54 @@ html, body { background: var(--mud-palette-background, #0b1220); }
         top: 0.5rem;
     }
 
+/* ---------- text emphasis scale ----------
+   Three levels, deliberately few, so secondary text can't drift into a dozen
+   near-identical opacities. Never go below .55 on text — contrast has to hold
+   in both themes; .40 is for decorative icons only. */
+
+.hino-dim    { opacity: .70; }
+.hino-muted  { opacity: .55; }
+.hino-faint  { opacity: .40; }  /* icons only, never text */
+
+/* Data text sizes: two, not nine. Compose with .mono and the emphasis scale —
+   family, size and emphasis stay three independent axes:
+   <span class="mono txt-sm hino-dim">. */
+.txt-sm { font-size: .80rem; }
+.txt-xs { font-size: .72rem; }
+
+.hino-ellipsis {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* empty-state icon above "nothing here yet" copy */
+.hino-empty-icon { font-size: 2rem; opacity: .4; }
+
+/* ---------- page structure ---------- */
+
+/* Every page opens with: <PageTitle> then .page-head (h1, status chip,
+   MudSpacer, meta on the right). Flex is what makes MudSpacer work. */
+.page-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .75rem;
+    margin-bottom: 1rem;
+}
+
+    .page-head h1 {
+        margin: 0;
+        font-size: 1.35rem;   /* == MudText Typo.h5, so both header styles line up */
+        font-weight: 600;
+        line-height: 1.2;
+        letter-spacing: .01em;
+    }
+
+/* Editor/detail panel opened from a row: a primary bar marks "this is the
+   thing you just selected". */
+.hino-panel-accent { border-left: 3px solid var(--mud-palette-primary); }
+
 /* ---------- app chrome ---------- */
 
 .hino-appbar {
@@ -183,6 +231,12 @@ html, body { background: var(--mud-palette-background, #0b1220); }
     transition: none;
 }
 
+/* Live data table: values update continuously, so digits must keep a constant
+   width and the LED/value/quality of a row must stay on one optical line. */
+.hino-table td,
+.hino-table th { font-variant-numeric: tabular-nums; }
+.hino-table td { vertical-align: middle; }
+
 /* KPI stat tiles */
 .kpi-row { display: flex; flex-wrap: wrap; gap: .75rem; }
 
@@ -219,6 +273,61 @@ html, body { background: var(--mud-palette-background, #0b1220); }
 .kpi-bad     { border-left-color: var(--hino-bad); }
 .kpi-neutral { border-left-color: var(--hino-idle); }
 
+/* ---------- device health cards (Live Data) ---------- */
+
+.dev-row { display: flex; flex-wrap: wrap; gap: .75rem; }
+
+.dev-card {
+    flex: 1 1 15rem;
+    min-width: 15rem;
+    max-width: 24rem;
+    padding: .55rem .8rem .65rem .8rem;
+    border-radius: 6px;
+    background: var(--mud-palette-surface);
+    border: 1px solid var(--mud-palette-lines-default);
+    overflow: hidden;   /* a long LastError must never spill past the card */
+}
+
+    /* MudTooltip wraps its child in an inline-block, which would shrink-wrap the
+       error line to its full unwrapped width; make it a block so the ellipsis bites. */
+    .dev-card .mud-tooltip-root {
+        display: block;
+        min-width: 0;
+    }
+
+.dev-head {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    font-size: .85rem;
+    font-weight: 600;
+    min-width: 0;
+}
+
+    .dev-head > span:nth-of-type(2) {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+.dev-stats {
+    display: flex;
+    gap: .9rem;
+    margin-top: .35rem;
+    font-family: var(--hino-mono);
+    font-size: .72rem;
+    opacity: .7;
+}
+
+.dev-error {
+    margin-top: .35rem;
+    font-size: .72rem;
+    color: var(--hino-bad);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ---------- alarms ---------- */
 
 /* Severity pill: colour comes from the page (one severity scale, one place). */
@@ -246,6 +355,11 @@ html, body { background: var(--mud-palette-background, #0b1220); }
     letter-spacing: .06em;
     white-space: nowrap;
 }
+
+/* Alarm rows carry two-line cells (name + message, status + who acked), so every
+   cell is centred on the row — the LED, the severity pill and the value must
+   read as one line even when a neighbouring cell wraps. */
+.alarm-row td { vertical-align: middle; }
 
 .alarm-empty {
     display: flex;

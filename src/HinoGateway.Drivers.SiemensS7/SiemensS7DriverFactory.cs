@@ -32,7 +32,7 @@ public sealed class SiemensS7DriverFactory : IDeviceDriverFactory
             new DriverSetting { Key = "CpuType", Label = "CPU type", Kind = DriverSettingKind.Choice, Default = "S71200", Choices = ["S7200", "S7300", "S7400", "S71200", "S71500", "Logo0BA8"] },
             new DriverSetting { Key = "Rack", Label = "Rack", Kind = DriverSettingKind.Number, Default = "0", Min = 0, Max = 255 },
             new DriverSetting { Key = "Slot", Label = "Slot", Kind = DriverSettingKind.Number, Default = "1", Min = 0, Max = 255 },
-            new DriverSetting { Key = "TimeoutMs", Label = "Timeout (ms)", Kind = DriverSettingKind.Number, Default = "3000", Min = 100, Max = 600_000 },
+            new DriverSetting { Key = "TimeoutMs", Label = "Timeout (ms)", Kind = DriverSettingKind.Number, Default = "3000", Min = 100, Max = 10_000 },
             new DriverSetting { Key = "MaxGapBytes", Label = "Max gap (bytes)", Kind = DriverSettingKind.Number, Default = "8", Min = 0, Max = 960, Advanced = true },
             new DriverSetting { Key = "MaxBlockBytes", Label = "Max block (bytes)", Kind = DriverSettingKind.Number, Default = "200", Min = 16, Max = 960, Advanced = true },
             new DriverSetting { Key = "PollDeadlineMs", Label = "Poll deadline (ms)", Kind = DriverSettingKind.Number, Default = "5000", Min = 100, Max = 600_000, Advanced = true },
@@ -45,12 +45,22 @@ public sealed class SiemensS7DriverFactory : IDeviceDriverFactory
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(Setting(config, "Host"))) errors.Add("Setting 'Host' is required.");
         Number("Port", 1, 65535); Number("Rack", 0, 255); Number("Slot", 0, 255);
-        Number("TimeoutMs", 100, 600_000); Number("MaxGapBytes", 0, 960);
+        Number("TimeoutMs", 100, 10_000); Number("MaxGapBytes", 0, 960);
         Number("MaxBlockBytes", 16, 960); Number("PollDeadlineMs", 100, 600_000);
         Number("QuarantineMs", 1_000, 86_400_000);
         var cpuText = Setting(config, "CpuType");
         if (cpuText.Length > 0 && !Enum.TryParse<CpuType>(cpuText, true, out _))
             errors.Add($"CpuType '{cpuText}' is invalid. Use S7200, S7300, S7400, S71200, S71500, or Logo0BA8.");
+
+        // S7netplus does not retry for us, so the whole per-request budget is the timeout. It still
+        // has to fit inside the stop deadline: the library reads on a socket timeout with no token,
+        // so a poll against a silent CPU is unreachable from the engine until it expires.
+        var timeoutText = Setting(config, "TimeoutMs");
+        if ((timeoutText.Length == 0 || int.TryParse(timeoutText, out _))
+            && DriverLimits.CheckCancellationBudget(
+                "TimeoutMs", timeoutText.Length == 0 ? 3000 : int.Parse(timeoutText), "Retries", 0) is { } budget)
+            errors.Add(budget);
+
         return errors;
 
         void Number(string key, int min, int max)

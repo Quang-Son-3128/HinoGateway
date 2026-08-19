@@ -42,7 +42,7 @@
         <div class="d-flex align-center mb-2" style="gap:.4rem">
             <MudIcon Icon="@(_selectedGroupId == RootId ? Icons.Material.Filled.AccountTree : Icons.Material.Filled.Folder)"
                      Size="Size.Small" Color="Color.Primary" />
-            <MudText Typo="Typo.subtitle1" Style="font-family:monospace">@CurrentPathLabel</MudText>
+            <MudText Typo="Typo.subtitle1" Class="mono">@CurrentPathLabel</MudText>
             <MudSpacer />
             @if (_selectedGroupId != RootId)
             {
@@ -55,7 +55,7 @@
 
         @if (_folderEdit is not null)
         {
-            <MudPaper Class="pa-4 mb-3" Elevation="0" Outlined Style="border-left:3px solid var(--mud-palette-primary)">
+            <MudPaper Class="pa-4 mb-3 hino-panel-accent" Elevation="0" Outlined>
                 <MudText Typo="Typo.h6" Class="mb-3">@(_folderIsNew ? "New folder" : $"Edit folder '{_folderEdit.Name}'")</MudText>
                 <div class="d-flex flex-wrap align-center" style="gap:1rem">
                     <MudTextField T="string" @bind-Value="_folderEdit.Name" Label="Folder name"
@@ -100,40 +100,40 @@
                         }
                         else
                         {
-                            <span style="opacity:.35">—</span>
+                            <span class="hino-muted">—</span>
                         }
                     </MudTd>
                     @* One column, three meanings: the address read, the formula computed, or the value held. *@
-                    <MudTd DataLabel="Source" Class="mono" Style="max-width:22rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                    <MudTd DataLabel="Source" Class="mono hino-ellipsis" Style="max-width:22rem">
                         <MudTooltip Text="@SourceText(context)"><span>@SourceText(context)</span></MudTooltip>
                     </MudTd>
-                    <MudTd DataLabel="Type"><span class="mono" style="font-size:.8rem;opacity:.8">@context.DataType</span></MudTd>
+                    <MudTd DataLabel="Type"><span class="mono txt-sm hino-dim">@context.DataType</span></MudTd>
                     <MudTd DataLabel="Unit">@context.Unit</MudTd>
                     <MudTd DataLabel="Scan">
                         @if (context.ScanIntervalMs > 0)
                         {
                             <MudTooltip Text="This tag has a rate of its own; the rest follow the connection.">
-                                <span class="mono" style="font-size:.78rem;color:var(--hino-warn)">@FormatRate(context.ScanIntervalMs)</span>
+                                <span class="mono txt-sm" style="color:var(--hino-warn)">@FormatRate(context.ScanIntervalMs)</span>
                             </MudTooltip>
                         }
                         else
                         {
-                            <span style="opacity:.35;font-size:.78rem">—</span>
+                            <span class="txt-sm hino-muted">—</span>
                         }
                     </MudTd>
-                    <MudTd DataLabel="Description" Style="opacity:.7;font-size:.85rem">@context.Description</MudTd>
+                    <MudTd DataLabel="Description" Class="txt-sm hino-dim">@context.Description</MudTd>
                     <MudTd DataLabel="Actions" Style="text-align:right">
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary" OnClick="() => EditTag(context)" />
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteTagAsync(context)" />
                     </MudTd>
                 </RowTemplate>
-                <NoRecordsContent><MudText Class="pa-4" Style="opacity:.5">No tags in this folder.</MudText></NoRecordsContent>
+                <NoRecordsContent><MudText Class="pa-4 hino-muted">No tags in this folder.</MudText></NoRecordsContent>
             </MudTable>
         </MudPaper>
 
         @if (_tagEdit is not null)
         {
-            <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined Style="border-left:3px solid var(--mud-palette-primary)">
+            <MudPaper Class="pa-4 mt-3 hino-panel-accent" Elevation="0" Outlined>
                 <MudText Typo="Typo.h6" Class="mb-3">
                     <MudIcon Icon="@(_tagIsNew ? Icons.Material.Filled.Add : Icons.Material.Filled.Edit)" Size="Size.Small" Class="me-1" />
                     @(_tagIsNew ? "New tag" : $"Edit {_tagEdit.Name}")
@@ -184,7 +184,10 @@
                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:6rem" />
                     <MudTextField T="string" @bind-Value="_tagEdit.Description" Label="Description" Placeholder="What this tag measures"
                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:18rem;flex-grow:1" />
-                    @if (_tagEdit.Kind != TagKind.Expression)
+                    @* Only the two kinds the engine will actually accept a write for. An accumulator is
+                       derived from a counter the device owns, so a write to it would be overwritten by
+                       the next tick — the same reason an expression tag has no switch here either. *@
+                    @if (_tagEdit.Kind is TagKind.Device or TagKind.Memory)
                     {
                         <MudTooltip Text="Safety interlock: REST and IEC-104 controls are rejected until this is enabled for this exact tag.">
                             <MudSwitch T="bool" @bind-Value="_tagEdit.AllowWrite" Color="Color.Warning"
@@ -243,7 +246,86 @@
                             </MudTooltip>
                         }
                     }
+                    @if (_tagEdit.Kind == TagKind.Accumulator)
+                    {
+                        @* Bound to the storage key, never to the path: the path is a position in the
+                           folder tree, and one rename would silently disconnect the tag that reports
+                           yesterday's energy to the utility. The select shows the path and stores the key. *@
+                        <MudTooltip Text="The device register that counts up and never resets — the inverter's total kWh, a meter's import register. The period's energy is this counter now minus what it read at the start of the period.">
+                            <MudSelect T="string" Value="@(_tagEdit.SourceTagKey ?? "")" ValueChanged="OnSourceTagChanged"
+                                       Label="Source counter" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                       Style="min-width:18rem">
+                                <MudSelectItem T="string" Value="@("")">(none)</MudSelectItem>
+                                @foreach (var c in CounterChoices)
+                                {
+                                    <MudSelectItem T="string" Value="@c.Id">@(string.IsNullOrWhiteSpace(c.Path) ? c.Name : c.Path)</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudTooltip>
+                        <MudSelect T="AccumulationPeriod" @bind-Value="_tagEdit.Period" Label="Period"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:12rem"
+                                   HelperText="@PeriodHint(_tagEdit.Period)">
+                            @foreach (var p in Enum.GetValues<AccumulationPeriod>())
+                            {
+                                <MudSelectItem T="AccumulationPeriod" Value="@p">@PeriodLabel(p)</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudTooltip Text="The engineering value at which the source counter wraps back to zero — 4294967.295 for a 32-bit register read in kWh with 3 decimals, for example. 0 means it never wraps. Without it, a wrap looks like the meter being replaced and every period is rebased.">
+                            <MudNumericField T="double" @bind-Value="_tagEdit.RolloverAt" Label="Counter wraps at"
+                                             Min="0" HideSpinButtons Format="0.###"
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:11rem" />
+                        </MudTooltip>
+                        <MudTooltip Text="Spike guard: a rise faster than this is rejected as a bad reading rather than added to the total. Set it a little above the plant's rated output — 1.2 × the inverter's kW is a sensible start. Leave empty to switch the check off.">
+                            <MudNumericField T="double?" @bind-Value="_tagEdit.MaxRatePerHour" Label="Max rise per hour"
+                                             Min="0" HideSpinButtons
+                                             Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:11rem" />
+                        </MudTooltip>
+                    }
                 </div>
+
+                @if (_tagEdit.Kind == TagKind.Accumulator)
+                {
+                    @if (CounterChoices.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense Class="mt-3" Variant="Variant.Outlined">
+                            There is no tag that could be a counter yet. Create the device tag that reads the
+                            meter's cumulative register first — an accumulator counts a device or memory tag,
+                            never a computed one.
+                        </MudAlert>
+                    }
+                    else if (string.IsNullOrWhiteSpace(_tagEdit.SourceTagKey))
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense Class="mt-3" Variant="Variant.Outlined">
+                            Pick the source counter — without one this tag cannot produce a number.
+                        </MudAlert>
+                    }
+                    else
+                    {
+                        <MudAlert Severity="Severity.Info" Dense Class="mt-3" Variant="Variant.Outlined">
+                            <b>@PeriodLabel(_tagEdit.Period)</b> =
+                            <code>@SelectedCounterPath</code> @MinuendLabel −
+                            <code>@SelectedCounterPath</code> @SubtrahendLabel.
+                            @if (_tagEdit.Period.IsPrevious())
+                            {
+                                <text>
+                                    A settled figure: it no longer depends on the live reading, which is why
+                                    it is already correct on the first millisecond after a restart.
+                                </text>
+                            }
+                            else
+                            {
+                                <text>
+                                    The baseline is kept on disk, so the total is right even if the gateway
+                                    was switched off for part of the period — the device's counter kept counting.
+                                </text>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(SelectedCounterWarning))
+                            {
+                                <div class="mt-1" style="color:var(--hino-warn)">@SelectedCounterWarning</div>
+                            }
+                        </MudAlert>
+                    }
+                }
 
                 @if (_tagEdit.Kind == TagKind.Device)
                 {
@@ -293,7 +375,7 @@
                     }
                     else if (_expressionError is null && _expressionReads.Count > 0)
                     {
-                        <MudText Typo="Typo.caption" Class="mt-1 d-block" Style="opacity:.7">
+                        <MudText Typo="Typo.caption" Class="mt-1 d-block hino-dim">
                             Reads: @string.Join(", ", _expressionReads)
                             @if (_expressionPreview is not null)
                             {
@@ -419,6 +501,71 @@
                 ? all
                 : all.Where(t => supported.Contains(t) || t == _tagEdit.DataType);
         }
+    }
+
+    // --- accumulator ---------------------------------------------------------
+
+    /// <summary>
+    /// The tags an accumulator is allowed to count, filtered to the same rule the server validates
+    /// with: a device or memory tag of a numeric type, and never itself. Offering anything else here
+    /// would let the editor accept a tag the apply then refuses.
+    /// </summary>
+    private List<TagDto> CounterChoices =>
+        _tags.Where(t => t.Kind is TagKind.Device or TagKind.Memory
+                         && t.DataType is not (DataType.Bool or DataType.String)
+                         && t.Id != _tagEdit?.Id)
+             .OrderBy(t => t.Path)
+             .ToList();
+
+    private TagDto? SelectedCounter =>
+        _tagEdit?.SourceTagKey is { Length: > 0 } key ? _tags.FirstOrDefault(t => t.Id == key) : null;
+
+    private string SelectedCounterPath =>
+        SelectedCounter is { } c ? (string.IsNullOrWhiteSpace(c.Path) ? c.Name : c.Path) : "?";
+
+    /// <summary>
+    /// What is worth saying about the chosen counter before the totals go wrong quietly. Both cases
+    /// are legal, so they warn rather than block.
+    /// </summary>
+    private string? SelectedCounterWarning
+    {
+        get
+        {
+            if (SelectedCounter is not { } c)
+                return null;
+            if (c.Kind == TagKind.Device && !c.Monotonic)
+                return $"'{c.Name}' is not marked \"Only increases (counter)\". A single bad read that "
+                     + "dips below the baseline is handled here, but ticking it on the source tag stops "
+                     + "the dip reaching this calculation at all.";
+            return null;
+        }
+    }
+
+    /// <summary>When the boundary of the chosen period falls, named the way a person says it.</summary>
+    private static string BoundaryLabel(AccumulationPeriod period) => period.Boundary() switch
+    {
+        AccumulationBoundary.Day => "local midnight",
+        AccumulationBoundary.Month => "00:00 on the 1st of the month",
+        _ => "00:00 on 1 January",
+    };
+
+    // The two halves of the subtraction, spelled out. A running period ends at the live reading; a
+    // settled one ended at its own boundary and has not moved since — which is the whole reason the
+    // two are separate tags.
+    private string MinuendLabel => _tagEdit is null ? ""
+        : _tagEdit.Period.IsPrevious() ? $"at the last {BoundaryLabel(_tagEdit.Period)}" : "now";
+
+    private string SubtrahendLabel => _tagEdit is null ? ""
+        : _tagEdit.Period.IsPrevious()
+            ? $"at the {BoundaryLabel(_tagEdit.Period)} before that"
+            : $"at the last {BoundaryLabel(_tagEdit.Period)}";
+
+    private void OnSourceTagChanged(string? key)
+    {
+        if (_tagEdit is null) return;
+        _tagEdit.SourceTagKey = string.IsNullOrWhiteSpace(key) ? null : key;
+        // Keep the preview honest straight away; the server recomputes it authoritatively on save.
+        _tagEdit.SourcePath = SelectedCounter?.Path ?? "";
     }
 
     private string TagRowStyle(TagDto t, int _) =>
@@ -635,6 +782,10 @@
             ScanIntervalMs = t.ScanIntervalMs,
             Expression = t.Expression, InitialValue = t.InitialValue,
             Retentive = t.Retentive, EvalMode = t.EvalMode,
+            // Copied explicitly, like every other field: the whole DTO is PUT back on save, so a field
+            // missing from this list is a field silently cleared by opening the tag and pressing Save.
+            SourceTagKey = t.SourceTagKey, SourcePath = t.SourcePath, Period = t.Period,
+            RolloverAt = t.RolloverAt, MaxRatePerHour = t.MaxRatePerHour,
         };
         _tagGroupId = t.GroupId ?? RootId;
         _folderEdit = null;
@@ -702,6 +853,7 @@
     {
         TagKind.Memory => "Memory",
         TagKind.Expression => "Expression",
+        TagKind.Accumulator => "Accumulator",
         _ => "Device",
     };
 
@@ -709,6 +861,7 @@
     {
         TagKind.Memory => Color.Warning,
         TagKind.Expression => Color.Tertiary,
+        TagKind.Accumulator => Color.Success,
         _ => Color.Default,
     };
 
@@ -718,12 +871,45 @@
         TagKind.Memory => string.IsNullOrWhiteSpace(t.InitialValue)
             ? "(no initial value)"
             : $"= {t.InitialValue}" + (t.Retentive ? " · kept" : ""),
+        // SourcePath is computed server-side from the storage key, so it survives a rename of the
+        // counter and shows where the number actually comes from.
+        TagKind.Accumulator => string.IsNullOrWhiteSpace(t.SourcePath)
+            ? "(no source counter)"
+            : $"{PeriodLabel(t.Period)} of {t.SourcePath}",
         _ => t.Address,
+    };
+
+    /// <summary>
+    /// The six periods, named the way a plant asks for them rather than after the enum. "Yesterday"
+    /// is the one a utility actually reports — EVN's Ainv_D-1 — so it says so here.
+    /// </summary>
+    private static string PeriodLabel(AccumulationPeriod period) => period switch
+    {
+        AccumulationPeriod.Day => "Today",
+        AccumulationPeriod.PreviousDay => "Yesterday",
+        AccumulationPeriod.Month => "This month",
+        AccumulationPeriod.PreviousMonth => "Last month",
+        AccumulationPeriod.Year => "This year",
+        AccumulationPeriod.PreviousYear => "Last year",
+        _ => period.ToString(),
+    };
+
+    private static string PeriodHint(AccumulationPeriod period) => period switch
+    {
+        AccumulationPeriod.Day => "since local midnight — grows through the day",
+        AccumulationPeriod.PreviousDay => "the completed previous day — this is EVN's Ainv_D-1",
+        AccumulationPeriod.Month => "since 00:00 on the 1st of this month",
+        AccumulationPeriod.PreviousMonth => "the completed previous calendar month",
+        AccumulationPeriod.Year => "since 00:00 on 1 January",
+        AccumulationPeriod.PreviousYear => "the completed previous calendar year",
+        _ => "",
     };
 
     private const string KindHelp =
         "Device: read from a connection by a driver. Memory: holds whatever is written to it — a "
-        + "setpoint, a mode, an operator note. Expression: computed from other tags by a formula.";
+        + "setpoint, a mode, an operator note. Expression: computed from other tags by a formula. "
+        + "Accumulator: energy over a calendar period, taken as a subtraction on a device's own "
+        + "cumulative counter.";
 
     private sealed class ExpressionCheck
     {
@@ -792,6 +978,8 @@
         { Snackbar.Add("Pick the connection this tag reads from.", Severity.Warning); return; }
         if (_tagEdit.Kind == TagKind.Expression && string.IsNullOrWhiteSpace(_tagEdit.Expression))
         { Snackbar.Add("An expression tag needs a formula.", Severity.Warning); return; }
+        if (_tagEdit.Kind == TagKind.Accumulator && string.IsNullOrWhiteSpace(_tagEdit.SourceTagKey))
+        { Snackbar.Add("Pick the source counter this accumulator subtracts.", Severity.Warning); return; }
         _tagEdit.GroupId = _tagGroupId == RootId ? null : _tagGroupId;
 
         _busy = true;

@@ -1,0 +1,4350 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<Project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" Name="Project">
+  <Storage></Storage>
+  <Roots>
+    <RootConnectivity>
+      <Storage></Storage>
+      <Connections>
+        <Connection Assembly="Siemens S7\NanoX.SCADA.Driver.SiemensS7.dll">
+          <Storage>
+            <Group Name="&#x9;General">
+              <Property Name="Name">
+                <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+              </Property>
+              <Property Name="Description">
+                <Value xsi:type="xsd:string"></Value>
+              </Property>
+              <Property Name="OperatingMode">
+                <Value xsi:type="xsd:int">0</Value>
+              </Property>
+            </Group>
+            <Group Name="Network">
+              <Property Name="NetworkAdapter">
+                <Value xsi:type="xsd:string">Default</Value>
+              </Property>
+              <Property Name="Address">
+                <Value xsi:type="xsd:string">192.168.3.4</Value>
+              </Property>
+              <Property Name="Port">
+                <Value xsi:type="xsd:int">102</Value>
+              </Property>
+              <Property Name="Rack">
+                <Value xsi:type="xsd:int">0</Value>
+              </Property>
+              <Property Name="Slot">
+                <Value xsi:type="xsd:int">1</Value>
+              </Property>
+            </Group>
+            <Group Name="Timing">
+              <Property Name="ConnectionTimeout">
+                <Value xsi:type="xsd:int">3000</Value>
+              </Property>
+              <Property Name="RequestTimeout">
+                <Value xsi:type="xsd:int">1000</Value>
+              </Property>
+              <Property Name="AttemptsBeforeTimeout">
+                <Value xsi:type="xsd:int">3</Value>
+              </Property>
+              <Property Name="TurnaroundDelay">
+                <Value xsi:type="xsd:int">10</Value>
+              </Property>
+            </Group>
+            <Group Name="Behavior">
+              <Property Name="ForceReconnect">
+                <Value xsi:type="xsd:boolean">false</Value>
+              </Property>
+              <Property Name="DequeueCount">
+                <Value xsi:type="xsd:int">10</Value>
+              </Property>
+              <Property Name="ReadAfterWrite">
+                <Value xsi:type="xsd:boolean">false</Value>
+              </Property>
+            </Group>
+            <Group Name="Demotion">
+              <Property Name="DemoteOnFailure">
+                <Value xsi:type="xsd:boolean">false</Value>
+              </Property>
+              <Property Name="TimeoutsToDemote">
+                <Value xsi:type="xsd:int">3</Value>
+              </Property>
+              <Property Name="DemotionPeriod">
+                <Value xsi:type="xsd:int">30000</Value>
+              </Property>
+              <Property Name="DiscardRequests">
+                <Value xsi:type="xsd:boolean">false</Value>
+              </Property>
+            </Group>
+            <Group Name="ReadBlock">
+              <Property Name="BlockCollection">
+                <Value xsi:type="ArrayOfString"></Value>
+              </Property>
+            </Group>
+          </Storage>
+        </Connection>
+      </Connections>
+    </RootConnectivity>
+    <RootNode>
+      <Storage></Storage>
+      <Nodes>
+        <Tag>
+          <Storage>
+            <Group Name="&#x9;General">
+              <Property Name="Name">
+                <Value xsi:type="xsd:string">Tag</Value>
+              </Property>
+              <Property Name="Description">
+                <Value xsi:type="xsd:string"></Value>
+              </Property>
+              <Property Name="Enabled">
+                <Value xsi:type="xsd:boolean">true</Value>
+              </Property>
+            </Group>
+            <Group Name="&#x9;Value">
+              <Property Name="ValueSource">
+                <Value xsi:type="xsd:int">0</Value>
+              </Property>
+              <Property Name="DataType">
+                <Value xsi:type="xsd:int">5</Value>
+              </Property>
+              <Property Name="ReadOnly">
+                <Value xsi:type="xsd:boolean">false</Value>
+              </Property>
+              <Property Name="FormatString">
+                <Value xsi:type="xsd:string"></Value>
+              </Property>
+              <Property Name="Connection">
+                <Value xsi:type="xsd:string">PLC1_Lixil3</Value>
+              </Property>
+            </Group>
+            <Group Name="Numberic">
+              <Property Name="Deadband">
+                <Value xsi:type="xsd:double">0</Value>
+              </Property>
+              <Property Name="DeadbandMode">
+                <Value xsi:type="xsd:int">0</Value>
+              </Property>
+              <Property Name="EngineeringLowLimit">
+                <Value xsi:type="xsd:double">0</Value>
+              </Property>
+              <Property Name="EngineeringHighLimit">
+                <Value xsi:type="xsd:double">100</Value>
+              </Property>
+              <Property Name="ClampMode">
+                <Value xsi:type="xsd:int">0</Value>
+              </Property>
+              <Property Name="ClampAction">
+                <Value xsi:type="xsd:int">0</Value>
+              </Property>
+              <Property Name="ScalingMode">
+                <Value xsi:type="xsd:int">0</Value>
+              </Property>
+            </Group>
+            <Group Name="&#x9;Script">
+              <Property Name="RefreshingEnabled">
+                <Value xsi:type="xsd:boolean">false</Value>
+              </Property>
+              <Property Name="RefreshedScript">
+                <Value xsi:type="xsd:string"></Value>
+              </Property>
+              <Property Name="ValueChangedEnabled">
+                <Value xsi:type="xsd:boolean">false</Value>
+              </Property>
+              <Property Name="ValueChangedScript">
+                <Value xsi:type="xsd:string"></Value>
+              </Property>
+              <Property Name="StatusChangedEnabled">
+                <Value xsi:type="xsd:boolean">false</Value>
+              </Property>
+              <Property Name="StatusChangedScript">
+                <Value xsi:type="xsd:string"></Value>
+              </Property>
+              <Property Name="WriteRequestedEnabled">
+                <Value xsi:type="xsd:boolean">false</Value>
+              </Property>
+              <Property Name="WriteRequestedScript">
+                <Value xsi:type="xsd:string"></Value>
+              </Property>
+            </Group>
+            <Group Name="Custom"></Group>
+          </Storage>
+        </Tag>
+        <Folder>
+          <Storage>
+            <Group Name="&#x9;General">
+              <Property Name="Name">
+                <Value xsi:type="xsd:string">Inverter</Value>
+              </Property>
+              <Property Name="Description">
+                <Value xsi:type="xsd:string"></Value>
+              </Property>
+            </Group>
+            <Group Name="Custom"></Group>
+          </Storage>
+          <Nodes>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">Inv1ActivePower</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string">kW</Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">4</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB1[128]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">1</Value>
+                  </Property>
+                  <Property Name="Gain">
+                    <Value xsi:type="xsd:double">0.001</Value>
+                  </Property>
+                  <Property Name="Offset">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="ScaledDataType">
+                    <Value xsi:type="xsd:int">9</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">Inv2ActivePower</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string">kW</Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">4</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB2[128]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">1</Value>
+                  </Property>
+                  <Property Name="Gain">
+                    <Value xsi:type="xsd:double">0.001</Value>
+                  </Property>
+                  <Property Name="Offset">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="ScaledDataType">
+                    <Value xsi:type="xsd:int">9</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">Inv3ActivePower</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string">kW</Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">4</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB3[128]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">1</Value>
+                  </Property>
+                  <Property Name="Gain">
+                    <Value xsi:type="xsd:double">0.001</Value>
+                  </Property>
+                  <Property Name="Offset">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="ScaledDataType">
+                    <Value xsi:type="xsd:int">9</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">Inv1Energy</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string">kWh</Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">5</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB1[144]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">1</Value>
+                  </Property>
+                  <Property Name="Gain">
+                    <Value xsi:type="xsd:double">0.01</Value>
+                  </Property>
+                  <Property Name="Offset">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="ScaledDataType">
+                    <Value xsi:type="xsd:int">9</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">Inv2Energy</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string">kWh</Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">5</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB2[144]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">1</Value>
+                  </Property>
+                  <Property Name="Gain">
+                    <Value xsi:type="xsd:double">0.01</Value>
+                  </Property>
+                  <Property Name="Offset">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="ScaledDataType">
+                    <Value xsi:type="xsd:int">9</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">Inv3Energy</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string">kWh</Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">5</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB3[144]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">1</Value>
+                  </Property>
+                  <Property Name="Gain">
+                    <Value xsi:type="xsd:double">0.01</Value>
+                  </Property>
+                  <Property Name="Offset">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="ScaledDataType">
+                    <Value xsi:type="xsd:int">9</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+          </Nodes>
+        </Folder>
+        <Folder>
+          <Storage>
+            <Group Name="&#x9;General">
+              <Property Name="Name">
+                <Value xsi:type="xsd:string">PowerMeter</Value>
+              </Property>
+              <Property Name="Description">
+                <Value xsi:type="xsd:string"></Value>
+              </Property>
+            </Group>
+            <Group Name="Custom"></Group>
+          </Storage>
+          <Nodes>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridActivePower</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB57[32]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridReActivePower</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB57[36]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridCurrentPhaseA</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB57[48]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridCurrentPhaseB</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB57[52]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridCurrentPhaseC</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB57[56]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridVoltagePhaseA</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB57[60]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">1</Value>
+                  </Property>
+                  <Property Name="Gain">
+                    <Value xsi:type="xsd:double">0.01</Value>
+                  </Property>
+                  <Property Name="Offset">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="ScaledDataType">
+                    <Value xsi:type="xsd:int">9</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridVoltagePhaseB</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB57[64]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">1</Value>
+                  </Property>
+                  <Property Name="Gain">
+                    <Value xsi:type="xsd:double">0.01</Value>
+                  </Property>
+                  <Property Name="Offset">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="ScaledDataType">
+                    <Value xsi:type="xsd:int">9</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridVoltagePhaseC</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB57[68]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">1</Value>
+                  </Property>
+                  <Property Name="Gain">
+                    <Value xsi:type="xsd:double">0.01</Value>
+                  </Property>
+                  <Property Name="Offset">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="ScaledDataType">
+                    <Value xsi:type="xsd:int">9</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridPF</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB57[40]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">Hz</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB57[44]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+          </Nodes>
+        </Folder>
+        <Folder>
+          <Storage>
+            <Group Name="&#x9;General">
+              <Property Name="Name">
+                <Value xsi:type="xsd:string">PLCControl</Value>
+              </Property>
+              <Property Name="Description">
+                <Value xsi:type="xsd:string"></Value>
+              </Property>
+            </Group>
+            <Group Name="Custom"></Group>
+          </Storage>
+          <Nodes>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">EnableEVNMode</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB9[0].4</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">SettingPEVN</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB9[24]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">TotalInvOn</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">3</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB9[60]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">PLoad</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Connection">
+                    <Value xsi:type="xsd:string">Connection_PLC_Riken</Value>
+                  </Property>
+                  <Property Name="Address">
+                    <Value xsi:type="xsd:string">DB9[20]</Value>
+                  </Property>
+                  <Property Name="ByteOrder">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Command>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">SetControlPower</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Scripting">
+                  <Property Name="Expression">
+                    <Value xsi:type="xsd:string">var modeNode = Node("/PLCControl/EnableEVNMode");
+var enabled  = XTagEx.EngValue(modeNode, false);
+if(enabled != true) return;
+
+var countNode    = Node("/PLCControl/TotalInvOn");
+var count        = countNode?.Value?.Engineering;
+if(count==0) return;
+var loadNode     = Node("/PLCControl/PLoad");
+var load         = loadNode?.Value?.Engineering;
+var grid         = Args["value"];
+var setPowerNode = Node("/PLCControl/SettingPEVN");
+
+var setPower = load + grid;
+setPowerNode?.Write(setPower);</Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Command>
+            <Command>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">SetControlPowerPercent</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Scripting">
+                  <Property Name="Expression">
+                    <Value xsi:type="xsd:string">var modeNode = Node("/PLCControl/EnableEVNMode");
+var enabled  = XTagEx.EngValue(modeNode, false);
+if(enabled != true) return;
+
+var percent  = (float)Args["value"];
+var setPower = 165 * (percent / 100);
+
+var setNode = Node("/PLCControl/SettingPEVN");
+setNode?.Write(setPower);</Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Command>
+          </Nodes>
+        </Folder>
+        <Folder>
+          <Storage>
+            <Group Name="&#x9;General">
+              <Property Name="Name">
+                <Value xsi:type="xsd:string">INTMemory</Value>
+              </Property>
+              <Property Name="Description">
+                <Value xsi:type="xsd:string"></Value>
+              </Property>
+            </Group>
+            <Group Name="Custom"></Group>
+          </Storage>
+          <Nodes>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridActivePower</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">2</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Expression">
+                    <Value xsi:type="xsd:string">return
+    - XTagEx.EngValue(Node("/PowerMeter/GridActivePower"), 0);</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">SolarActivePower</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">2</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Expression">
+                    <Value xsi:type="xsd:string">return 
+    XTagEx.EngValue(Node("/Inverter/Inv1ActivePower"), 0) + 
+    XTagEx.EngValue(Node("/Inverter/Inv2ActivePower"), 0) +
+    XTagEx.EngValue(Node("/Inverter/Inv3ActivePower"), 0) + 
+    XTagEx.EngValue(Node("/Inverter/Inv4ActivePower"), 0) + 
+    XTagEx.EngValue(Node("/Inverter/Inv5ActivePower"), 0) +
+    XTagEx.EngValue(Node("/Inverter/Inv6ActivePower"), 0) +
+    XTagEx.EngValue(Node("/Inverter/Inv7ActivePower"), 0);</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">Inv1EnergyYesterday</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">2</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Expression">
+                    <Value xsi:type="xsd:string">var node      = Node("/Inverter/Inv1Energy");
+var nodeValue = XTagEx.EngValue(node, null);
+if(!float.TryParse(nodeValue?.ToString() ?? "", out float energy)) return 0;
+
+var date = DateTime.Now.Date;
+var vars = This.Vars;
+vars.InitVar("date", date)
+    .InitVar("start", energy)
+    .InitVar("value", 0);
+    
+if(date != (DateTime)vars["date"])
+{
+    vars["value"] = energy - vars["start"];
+    vars["date"] = date;
+    vars["start"] = energy;
+} 
+return vars["value"];</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">Inv2EnergyYesterday</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">2</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Expression">
+                    <Value xsi:type="xsd:string">var node      = Node("/Inverter/Inv2Energy");
+var nodeValue = XTagEx.EngValue(node, null);
+if(!float.TryParse(nodeValue?.ToString() ?? "", out float energy)) return 0;
+
+var date = DateTime.Now.Date;
+var vars = This.Vars;
+vars.InitVar("date", date)
+    .InitVar("start", energy)
+    .InitVar("value", 0);
+    
+if(date != (DateTime)vars["date"])
+{
+    vars["value"] = energy - vars["start"];
+    vars["date"] = date;
+    vars["start"] = energy;
+} 
+return vars["value"];</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">Inv3EnergyYesterday</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">2</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Expression">
+                    <Value xsi:type="xsd:string">var node      = Node("/Inverter/Inv3Energy");
+var nodeValue = XTagEx.EngValue(node, null);
+if(!float.TryParse(nodeValue?.ToString() ?? "", out float energy)) return 0;
+
+var date = DateTime.Now.Date;
+var vars = This.Vars;
+vars.InitVar("date", date)
+    .InitVar("start", energy)
+    .InitVar("value", 0);
+    
+if(date != (DateTime)vars["date"])
+{
+    vars["value"] = energy - vars["start"];
+    vars["date"] = date;
+    vars["start"] = energy;
+} 
+return vars["value"];</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">TotalEnergyYesterday</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">2</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Expression">
+                    <Value xsi:type="xsd:string">return 
+    XTagEx.EngValue(Node("/INTMemory/Inv1EnergyYesterday"), 0) + 
+    XTagEx.EngValue(Node("/INTMemory/Inv2EnergyYesterday"), 0) + 
+    XTagEx.EngValue(Node("/INTMemory/Inv3EnergyYesterday"), 0) ;</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridReActivePower</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">2</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Expression">
+                    <Value xsi:type="xsd:string">return
+    - XTagEx.EngValue(Node("/PowerMeter/GridReActivePower"), 0);</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridCurrentPhaseA</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">2</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Expression">
+                    <Value xsi:type="xsd:string">return 
+    XTagEx.EngValue(Node("/PowerMeter/GridCurrentPhaseA"), 0);</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridCurrentPhaseB</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">2</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Expression">
+                    <Value xsi:type="xsd:string">return 
+    XTagEx.EngValue(Node("/PowerMeter/GridCurrentPhaseB"), 0);</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+            <Tag>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">GridCurrentPhaseC</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Enabled">
+                    <Value xsi:type="xsd:boolean">true</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Value">
+                  <Property Name="ValueSource">
+                    <Value xsi:type="xsd:int">2</Value>
+                  </Property>
+                  <Property Name="DataType">
+                    <Value xsi:type="xsd:int">8</Value>
+                  </Property>
+                  <Property Name="ReadOnly">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="FormatString">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="Expression">
+                    <Value xsi:type="xsd:string">return 
+    XTagEx.EngValue(Node("/PowerMeter/GridCurrentPhaseC"), 0);</Value>
+                  </Property>
+                  <Property Name="ScanRate">
+                    <Value xsi:type="xsd:unsignedInt">100</Value>
+                  </Property>
+                </Group>
+                <Group Name="Numberic">
+                  <Property Name="Deadband">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="DeadbandMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="EngineeringLowLimit">
+                    <Value xsi:type="xsd:double">0</Value>
+                  </Property>
+                  <Property Name="EngineeringHighLimit">
+                    <Value xsi:type="xsd:double">100</Value>
+                  </Property>
+                  <Property Name="ClampMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ClampAction">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                  <Property Name="ScalingMode">
+                    <Value xsi:type="xsd:int">0</Value>
+                  </Property>
+                </Group>
+                <Group Name="&#x9;Script">
+                  <Property Name="RefreshingEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="RefreshedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="ValueChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="ValueChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="StatusChangedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="StatusChangedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                  <Property Name="WriteRequestedEnabled">
+                    <Value xsi:type="xsd:boolean">false</Value>
+                  </Property>
+                  <Property Name="WriteRequestedScript">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Custom"></Group>
+              </Storage>
+            </Tag>
+          </Nodes>
+        </Folder>
+      </Nodes>
+    </RootNode>
+    <RootScripting>
+      <Storage></Storage>
+      <Tasks>
+        <Task>
+          <Storage>
+            <Group Name="&#x9;General">
+              <Property Name="Name">
+                <Value xsi:type="xsd:string">Calulatecontrolvalue</Value>
+              </Property>
+              <Property Name="Description">
+                <Value xsi:type="xsd:string"></Value>
+              </Property>
+              <Property Name="Enabled">
+                <Value xsi:type="xsd:boolean">false</Value>
+              </Property>
+            </Group>
+            <Group Name="&#x9;Schedule">
+              <Property Name="Cycle">
+                <Value xsi:type="xsd:int">0</Value>
+              </Property>
+            </Group>
+            <Group Name="&#x9;Scripting">
+              <Property Name="Expression">
+                <Value xsi:type="xsd:string">var enabledNode = Node("/Control/EnabledControlPower");
+var enabled     = (bool)XTagEx.EngValue(enabledNode, false);
+if(!enabled) return;
+
+var nodeEVN  = Node("/INTMemory/EVNActivePower");
+var EVNPower = nodeEVN?.Value?.Engineering;
+   
+var nodeSolar  = Node("/INTMemory/SolarActivePower");
+var SolarPower = nodeSolar?.Value?.Engineering;
+var nodeGrid   = Node("/INTMemory/GridActivePower");
+var GridPower  = nodeGrid?.Value?.Engineering;
+var totalPower = SolarPower-GridPower+EVNPower;
+var node1      = Node("/INTMemory/Controlvalue");
+node1?.Write(totalPower);</Value>
+              </Property>
+            </Group>
+          </Storage>
+        </Task>
+      </Tasks>
+    </RootScripting>
+    <RootIntegration>
+      <Storage></Storage>
+      <Adapters>
+        <Adapter Assembly="IEC104\NanoX.SCADA.Protocol.IEC104.dll">
+          <Storage>
+            <Group Name="&#x9;General">
+              <Property Name="Name">
+                <Value xsi:type="xsd:string">Adapter</Value>
+              </Property>
+              <Property Name="Description">
+                <Value xsi:type="xsd:string"></Value>
+              </Property>
+            </Group>
+            <Group Name="Network">
+              <Property Name="Address">
+                <Value xsi:type="xsd:string">172.31.3.190</Value>
+              </Property>
+              <Property Name="Port">
+                <Value xsi:type="xsd:int">2404</Value>
+              </Property>
+            </Group>
+            <Group Name="Application">
+              <Property Name="OriginatorAddress">
+                <Value xsi:type="xsd:unsignedByte">0</Value>
+              </Property>
+              <Property Name="SizeOfCOT">
+                <Value xsi:type="xsd:int">2</Value>
+              </Property>
+              <Property Name="SizeOfCA">
+                <Value xsi:type="xsd:int">2</Value>
+              </Property>
+              <Property Name="SizeOfIOA">
+                <Value xsi:type="xsd:int">3</Value>
+              </Property>
+              <Property Name="MaxASDULength">
+                <Value xsi:type="xsd:int">249</Value>
+              </Property>
+            </Group>
+            <Group Name="Transport">
+              <Property Name="K">
+                <Value xsi:type="xsd:int">12</Value>
+              </Property>
+              <Property Name="W">
+                <Value xsi:type="xsd:int">8</Value>
+              </Property>
+              <Property Name="T0">
+                <Value xsi:type="xsd:int">10</Value>
+              </Property>
+              <Property Name="T1">
+                <Value xsi:type="xsd:int">15</Value>
+              </Property>
+              <Property Name="T2">
+                <Value xsi:type="xsd:int">10</Value>
+              </Property>
+              <Property Name="T3">
+                <Value xsi:type="xsd:int">20</Value>
+              </Property>
+            </Group>
+            <Group Name="Behavior">
+              <Property Name="ServerMode">
+                <Value xsi:type="xsd:int">0</Value>
+              </Property>
+              <Property Name="MaxQueueSize">
+                <Value xsi:type="xsd:int">1</Value>
+              </Property>
+              <Property Name="MaxOpenConnections">
+                <Value xsi:type="xsd:int">10</Value>
+              </Property>
+            </Group>
+          </Storage>
+          <IntegrationGroups>
+            <IntegrationGroup>
+              <Storage>
+                <Group Name="&#x9;General">
+                  <Property Name="Name">
+                    <Value xsi:type="xsd:string">Group</Value>
+                  </Property>
+                  <Property Name="Description">
+                    <Value xsi:type="xsd:string"></Value>
+                  </Property>
+                </Group>
+                <Group Name="Application">
+                  <Property Name="CommonAddress">
+                    <Value xsi:type="xsd:int">3</Value>
+                  </Property>
+                </Group>
+              </Storage>
+              <IntegrationPoints>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">PMGridActivePower</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">C&#xFFFD;ng su&#x1EA5;t t&#xFFFD;c d&#x1EE5;ng t&#x1EE9;c th&#x1EDD;i ph&#xFFFD;t l&#xFFFD;n l&#x1B0;&#x1EDB;i (P-out)</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/INTMemory/GridActivePower</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">1</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">SolarTotalActivePower</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">T&#x1ED5;ng c&#xFFFD;ng su&#x1EA5;t t&#xFFFD;c d&#x1EE5;ng t&#x1EE9;c th&#x1EDD;i ph&#xFFFD;t ra t&#x1EEB; c&#xFFFD;c Inverter (Pinv-out)</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/INTMemory/SolarActivePower</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">2</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">TotalSolarYesterdayEnegy</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">T&#x1ED5;ng s&#x1EA3;n l&#x1B0;&#x1EE3;ng &#x111;i&#x1EC7;n n&#x103;ng ph&#xFFFD;t ra t&#x1EEB; c&#xFFFD;c Inverter c&#x1EE7;a ng&#xFFFD;y li&#x1EC1;n k&#x1EC1; tr&#x1B0;&#x1EDB;c (Ainv_D-1)</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/INTMemory/TotalEnergyYesterday</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">3</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">EnableControlPout</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">Cho ph&#xFFFD;p &#x111;i&#x1EC1;u khi&#x1EC3;n P-out</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/PLCControl/EnableEVNMode</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">45</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">11</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">ControlPoutPercentage</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">SetPoint P-out theo %</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/PLCControl/SetControlPowerPercent</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">50</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">12</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">ControlPoutkW</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">&#x110;i&#x1EC3;m &#x111;&#x1EB7;t P-out theo kW</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/PLCControl/SetControlPower</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">50</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">TotalReActivePower</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">C&#xFFFD;ng su&#x1EA5;t ph&#x1EA3;n kh&#xFFFD;ng ph&#xFFFD;t l&#xFFFD;n l&#x1B0;&#x1EDB;i t&#x1EE9;c th&#x1EDD;i (kVAr)</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/INTMemory/GridReActivePower</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">4</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">PhaseAVoltage</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">&#x110;i&#x1EC7;n &#xFFFD;p pha t&#x1EE9;c th&#x1EDD;i Ua (V) </Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/PowerMeter/GridVoltagePhaseA</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">5</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">PhaseBVoltage</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">&#x110;i&#x1EC7;n &#xFFFD;p pha t&#x1EE9;c th&#x1EDD;i Ua (V)</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/PowerMeter/GridVoltagePhaseB</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">6</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">PhaseCVoltage</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">&#x110;i&#x1EC7;n &#xFFFD;p pha t&#x1EE9;c th&#x1EDD;i Uc (V)</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/PowerMeter/GridVoltagePhaseC</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">7</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">PhaseACurrent</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">D&#xFFFD;ng &#x111;i&#x1EC7;n pha t&#x1EE9;c th&#x1EDD;i Ia (A)</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/INTMemory/GridCurrentPhaseA</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">8</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">PhaseBCurrent</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">D&#xFFFD;ng &#x111;i&#x1EC7;n pha t&#x1EE9;c th&#x1EDD;i Ib (A)</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/INTMemory/GridCurrentPhaseB</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">9</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">PhaseCCurrent</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">D&#xFFFD;ng &#x111;i&#x1EC7;n pha t&#x1EE9;c th&#x1EDD;i Ic (A)</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/INTMemory/GridCurrentPhaseC</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">10</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">Hz</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">Tan so</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/PowerMeter/Hz</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">11</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">PowerFactor</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">H&#x1EC7; s&#x1ED1; c&#xFFFD;ng su&#x1EA5;t</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/PowerMeter/GridPF</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">12</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">INV1ActivePower</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">C&#xFFFD;ng su&#x1EA5;t t&#xFFFD;c d&#x1EE5;ng ph&#xFFFD;t &#x111;&#x1EA7;u c&#x1EF1;c c&#x1EE7;a Inverter 1</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/Inverter/Inv1ActivePower</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">INV1YesterdayEnergy</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">S&#x1EA3;n l&#x1B0;&#x1EE3;ng &#x111;i&#x1EC7;n n&#x103;ng t&#xFFFD;c d&#x1EE5;ng &#x111;&#x1EA7;u c&#x1EF1;c c&#x1EE7;a Inverter 1 c&#x1EE7;a ng&#xFFFD;y li&#x1EC1;n k&#x1EC1; tr&#x1B0;&#x1EDB;c</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/INTMemory/Inv1EnergyYesterday</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">14</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string">00:00:00</Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">INV2ActivePower</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">C&#xFFFD;ng su&#x1EA5;t t&#xFFFD;c d&#x1EE5;ng ph&#xFFFD;t &#x111;&#x1EA7;u c&#x1EF1;c c&#x1EE7;a Inverter 2</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/Inverter/Inv2ActivePower</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">15</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">INV2YesterdayEnergy</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">S&#x1EA3;n l&#x1B0;&#x1EE3;ng &#x111;i&#x1EC7;n n&#x103;ng t&#xFFFD;c d&#x1EE5;ng &#x111;&#x1EA7;u c&#x1EF1;c c&#x1EE7;a Inverter 2 c&#x1EE7;a ng&#xFFFD;y li&#x1EC1;n k&#x1EC1; tr&#x1B0;&#x1EDB;c</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/INTMemory/Inv2EnergyYesterday</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">16</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">INV3ActivePower</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">C&#xFFFD;ng su&#x1EA5;t t&#xFFFD;c d&#x1EE5;ng ph&#xFFFD;t &#x111;&#x1EA7;u c&#x1EF1;c c&#x1EE7;a Inverter 3</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/Inverter/Inv3ActivePower</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">17</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">INV3YesterdayEnergy</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">S&#x1EA3;n l&#x1B0;&#x1EE3;ng &#x111;i&#x1EC7;n n&#x103;ng t&#xFFFD;c d&#x1EE5;ng &#x111;&#x1EA7;u c&#x1EF1;c c&#x1EE7;a Inverter 3 c&#x1EE7;a ng&#xFFFD;y li&#x1EC1;n k&#x1EC1; tr&#x1B0;&#x1EDB;c</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/INTMemory/Inv3EnergyYesterday</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">18</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">EnableControlQout</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">Cho ph&#xFFFD;p &#x111;i&#x1EC1;u khi&#x1EC3;n Q-out</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/Control/SetEnabledControlRePower</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">45</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">12</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">ControlQoutPhanTram</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">&#x110;i&#x1EC3;m &#x111;&#x1EB7;t Q-out theo % </Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/Control/SetControlRePowerPercent</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">50</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">14</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+                <IntegrationPoint>
+                  <Storage>
+                    <Group Name="&#x9;General">
+                      <Property Name="Name">
+                        <Value xsi:type="xsd:string">ControlPoutkvar</Value>
+                      </Property>
+                      <Property Name="Description">
+                        <Value xsi:type="xsd:string">&#x110;i&#x1EC3;m &#x111;&#x1EB7;t Q-out theo kvar </Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Configuration">
+                      <Property Name="Source">
+                        <Value xsi:type="xsd:string">/Control/SetControlPowerkvar</Value>
+                      </Property>
+                      <Property Name="DataType">
+                        <Value xsi:type="xsd:int">13</Value>
+                      </Property>
+                      <Property Name="Address">
+                        <Value xsi:type="xsd:int">15</Value>
+                      </Property>
+                    </Group>
+                    <Group Name="Trigger">
+                      <Property Name="EnabledValueTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="EnabledTimeTrigger">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="IsCyclic">
+                        <Value xsi:type="xsd:boolean">true</Value>
+                      </Property>
+                      <Property Name="CyclicType">
+                        <Value xsi:type="xsd:int">0</Value>
+                      </Property>
+                      <Property Name="AtTime">
+                        <Value xsi:type="xsd:string">00:00:00</Value>
+                      </Property>
+                      <Property Name="EnabledEventTrigger">
+                        <Value xsi:type="xsd:boolean">false</Value>
+                      </Property>
+                      <Property Name="NodeTrigger">
+                        <Value xsi:type="xsd:string"></Value>
+                      </Property>
+                    </Group>
+                  </Storage>
+                </IntegrationPoint>
+              </IntegrationPoints>
+            </IntegrationGroup>
+          </IntegrationGroups>
+        </Adapter>
+      </Adapters>
+    </RootIntegration>
+    <RootHosting>
+      <Storage></Storage>
+      <HostingHosts></HostingHosts>
+    </RootHosting>
+  </Roots>
+</Project>

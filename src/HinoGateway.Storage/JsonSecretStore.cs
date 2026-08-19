@@ -70,33 +70,55 @@ public sealed class JsonSecretStore : ISecretStore
         if (!File.Exists(_path))
             return;
 
-        try
-        {
-            var loaded = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(_path));
-            if (loaded is not null)
-                _values = new Dictionary<string, string>(loaded, StringComparer.OrdinalIgnoreCase);
-            _logger.LogInformation("Loaded {Count} secret(s) from {Path}", _values.Count, _path);
-        }
-        catch (Exception ex)
-        {
-            // Deliberately not fatal, unlike the project file: a gateway that cannot read its
-            // secrets should still come up polling everything that needs none, with the affected
-            // connections failing to authenticate and saying so.
-            _logger.LogError(ex, "Could not read the secret file {Path}; treating it as empty", _path);
-        }
+        if (!TryLoad(_path, primary: true) && File.Exists(_path + ".bak") && TryLoad(_path + ".bak", primary: false))
+            _logger.LogWarning("Gateway credentials were restored from the backup {Path}.bak; " +
+                               "the primary file was unusable", _path);
 
         try { HardenPermissions(_path); }
         catch (Exception ex) { _logger.LogWarning(ex, "Could not restrict permissions on secret file {Path}", _path); }
+    }
+
+    /// <summary>
+    /// Read one credential file. Failure is deliberately not fatal, unlike the project file: a
+    /// gateway that cannot read its secrets should still come up polling everything that needs none,
+    /// with the affected connections failing to authenticate and saying so.
+    /// </summary>
+    private bool TryLoad(string path, bool primary)
+    {
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path));
+            if (loaded is null)
+                return false;
+            _values = new Dictionary<string, string>(loaded, StringComparer.OrdinalIgnoreCase);
+            _logger.LogInformation("Loaded {Count} secret(s) from {Path}", _values.Count, path);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.Log(primary ? LogLevel.Warning : LogLevel.Error, ex,
+                "Could not read the secret file {Path}", path);
+            return false;
+        }
     }
 
     private void Save()
     {
         try
         {
+            // The backup path was missing here while the project file, the retained values and the
+            // energy baselines all had one. That left the credentials as the only durable state in
+            // the gateway with nothing behind it: a file lost to a power cut took every PLC and
+            // broker password with it, and the only way back was an engineer retyping them on site.
             DurableAtomicFile.WriteAllText(_path, JsonSerializer.Serialize(_values, Json),
+                backupPath: _path + ".bak",
                 prepareTemp: HardenPermissions,
                 unixCreateMode: UnixFileMode.UserRead | UnixFileMode.UserWrite);
             HardenPermissions(_path);
+            // The backup holds the same passwords, so it gets the same ACL. File.Replace carries the
+            // displaced file's permissions over, but the very first save creates it by other means.
+            if (File.Exists(_path + ".bak"))
+                HardenPermissions(_path + ".bak");
         }
         catch (Exception ex)
         {

@@ -115,4 +115,50 @@ public class ModbusValidationTests
         Assert.Throws<NotSupportedException>(() =>
             ModbusCodec.EncodeRegisters(DataType.String, "AB", wordSwap: false));
     }
+
+    [Theory]
+    // Each half is a setting an engineer might reasonably reach for on a slow radio link; it is
+    // their product that decides whether a reload can stop the connection.
+    [InlineData("8000", "1", false)]     // 16 s of blocking read against a 10 s stop deadline
+    [InlineData("10000", "10", false)]
+    [InlineData("600000", "0", false)]   // the old ceiling: ten minutes inside one uncancellable read
+    [InlineData("5000", "1", true)]      // exactly 10 s is still inside the deadline
+    [InlineData("3000", "1", true)]      // what the EVN project actually runs
+    [InlineData("1000", "0", true)]
+    public void A_request_budget_larger_than_the_stop_deadline_is_refused(string timeout, string retries, bool usable)
+    {
+        var problems = Factory.Validate(Device(new Dictionary<string, string>
+        {
+            ["Host"] = "127.0.0.1",
+            ["TimeoutMs"] = timeout,
+            ["Retries"] = retries,
+        }));
+
+        if (usable)
+        {
+            Assert.DoesNotContain(problems, p => p.Contains("give up within"));
+            return;
+        }
+
+        // The arithmetic belongs in the message: "lower the timeout" without saying what it
+        // multiplies out to is advice the operator cannot check.
+        var problem = Assert.Single(problems, p => p.Contains("give up within"));
+        Assert.Contains("TimeoutMs", problem);
+
+        // With no retries there is no product to show, and naming 'Retries' would send the operator
+        // looking for a second setting to lower when the timeout alone is the whole budget.
+        if (retries == "0")
+            Assert.DoesNotContain("Retries", problem);
+        else
+            Assert.Contains("Retries", problem);
+    }
+
+    [Fact]
+    public void The_default_settings_leave_room_to_stop()
+    {
+        // No timeout or retry configured at all must not be a rejected connection — the defaults the
+        // driver would apply have to satisfy the same rule the explicit values are held to.
+        var problems = Factory.Validate(Device(new Dictionary<string, string> { ["Host"] = "127.0.0.1" }));
+        Assert.DoesNotContain(problems, p => p.Contains("give up within"));
+    }
 }

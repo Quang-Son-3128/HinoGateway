@@ -183,6 +183,23 @@ public sealed class SiemensS7Driver : IDeviceDriver, IDriverDiagnostics, ITransp
     public Task DisconnectAsync(CancellationToken ct) { _plc.Close(); return Task.CompletedTask; }
     public ValueTask DisposeAsync() { _plc.Close(); return ValueTask.CompletedTask; }
 
+    /// <summary>
+    /// Same rescue as the Modbus driver's, for the same reason: S7netplus reads on a socket timeout
+    /// rather than a cancellation token, so a poll against a PLC that stopped answering cannot be
+    /// called off from the engine. Closing the link makes the pending read fail immediately, which
+    /// is what lets a reload finish instead of abandoning this worker.
+    ///
+    /// <para>
+    /// Called from the shutdown path while the poll thread may still be inside the library, so it
+    /// takes nothing but the close and swallows whatever that throws.
+    /// </para>
+    /// </summary>
+    public Task AbortAsync()
+    {
+        try { _plc.Close(); } catch { }
+        return Task.CompletedTask;
+    }
+
     private object Decode(S7Point point, Dictionary<(S7Area, int, int), byte> data)
     {
         var bytes = new byte[point.Size];

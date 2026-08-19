@@ -21,7 +21,7 @@
         @(_connected ? "LIVE" : "OFFLINE")
     </MudChip>
     <MudSpacer />
-    <MudText Typo="Typo.caption" Class="mono" Style="opacity:.55">@_updateCount updates received</MudText>
+    <MudText Typo="Typo.caption" Class="mono hino-muted">@_updateCount updates received</MudText>
 </div>
 
 @foreach (var alarm in _components.Where(x => x.AlarmActive))
@@ -34,7 +34,7 @@
 <div class="kpi-row mb-4">
     <div class="kpi kpi-accent">
         <div class="kpi-label">Connections</div>
-        <div class="kpi-value">@_health.Count(h => h.State == DeviceState.Connected)<span style="opacity:.45;font-size:.8em">/@_health.Count</span></div>
+        <div class="kpi-value">@_health.Count(h => h.State == DeviceState.Connected)<span class="hino-muted" style="font-size:.8em">/@_health.Count</span></div>
         <div class="kpi-sub">connected / total</div>
     </div>
     <div class="kpi kpi-neutral">
@@ -64,7 +64,7 @@
 
     @if (_health.Count > 12)
     {
-        <MudText Typo="Typo.caption" Class="mono d-block mb-2" Style="opacity:.6">
+        <MudText Typo="Typo.caption" Class="mono d-block mb-2 hino-muted">
             @_health.Count(h => h.State == DeviceState.Connected)/@_health.Count connections healthy
             @(cards.Count > 0 ? " — showing troubled only:" : "")
         </MudText>
@@ -77,7 +77,7 @@
                     <span class="led @StateLed(h.State)"></span>
                     <span>@h.DeviceId</span>
                     <MudSpacer />
-                    <span style="opacity:.6;font-size:.75em">@h.State.ToString().ToUpperInvariant()</span>
+                    <span class="mono txt-xs hino-muted">@h.State.ToString().ToUpperInvariant()</span>
                 </div>
                 <div class="dev-stats">
                     <span title="Latency of the last successful poll">⏱ @FormatLatency(h.LastPollLatency)</span>
@@ -103,9 +103,9 @@ else
 {
     <MudPaper Elevation="0" Outlined Class="mb-4">
         <MudToolBar Dense Class="px-3" Style="gap:.6rem">
-            <MudIcon Icon="@Icons.Material.Filled.TableRows" Size="Size.Small" Style="opacity:.6" />
+            <MudIcon Icon="@Icons.Material.Filled.TableRows" Size="Size.Small" Class="hino-muted" />
             <MudText Typo="Typo.subtitle2">Tag values</MudText>
-            <MudText Typo="Typo.caption" Class="mono" Style="opacity:.5">@_view.Count / @_infos.Count</MudText>
+            <MudText Typo="Typo.caption" Class="mono hino-muted">@_view.Count / @_infos.Count</MudText>
             <MudSpacer />
             <MudTextField T="string" @bind-Value="_filter" @bind-Value:after="OnFilterChanged"
                           Placeholder="Filter tags…" Adornment="Adornment.Start"
@@ -137,21 +137,21 @@ else
                 </MudTd>
                 <MudTd DataLabel="Tag ID">
                     <MudLink Href="@($"tags?select={Uri.EscapeDataString(context.Id)}")"
-                             Class="mono" Style="font-size:.82rem">@context.Id</MudLink>
+                             Class="mono txt-sm">@context.Id</MudLink>
                 </MudTd>
                 <MudTd DataLabel="Name">@context.Name</MudTd>
-                <MudTd DataLabel="Connection"><span class="mono" style="font-size:.8rem;opacity:.75">@context.DeviceId</span></MudTd>
-                <MudTd DataLabel="Description" Style="opacity:.7;font-size:.85rem">@context.Description</MudTd>
+                <MudTd DataLabel="Connection"><span class="mono txt-sm hino-dim">@context.DeviceId</span></MudTd>
+                <MudTd DataLabel="Description" Class="txt-sm hino-dim">@context.Description</MudTd>
                 <MudTd DataLabel="Value" Style="text-align:right">
                     <span class="tag-value @(has && IsFresh(s!.LastChanged) ? "changed" : "")">
                         @(has ? FormatValue(s!.Value) : "—")
                     </span>
-                    <span style="opacity:.5;font-size:.78rem">@context.Unit</span>
+                    <span class="txt-xs hino-muted">@context.Unit</span>
                 </MudTd>
                 <MudTd DataLabel="Quality">
                     @if (has)
                     {
-                        <span class="mono" style="font-size:.78rem;color:@QualityCss(s!.Quality)">@s.Quality.ToString().ToUpperInvariant()</span>
+                        <span class="mono txt-sm" style="color:@QualityCss(s!.Quality)">@s.Quality.ToString().ToUpperInvariant()</span>
                     }
                 </MudTd>
                 <MudTd DataLabel="Message">
@@ -159,14 +159,14 @@ else
                     {
                         <MudTooltip Text="@s.StatusText">
                             <MudText Typo="Typo.caption" Color="@(s.Quality == Quality.Bad ? Color.Error : Color.Warning)"
-                                     Style="max-width:20rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">
+                                     Class="hino-ellipsis d-block" Style="max-width:20rem">
                                 @s.StatusText
                             </MudText>
                         </MudTooltip>
                     }
                 </MudTd>
                 <MudTd DataLabel="Last change" Style="text-align:right">
-                    <span class="mono" style="opacity:.65;font-size:.78rem">@(has ? FormatLastChanged(s!.LastChanged) : "")</span>
+                    <span class="mono txt-sm hino-dim">@(has ? FormatLastChanged(s!.LastChanged) : "")</span>
                 </MudTd>
                 <MudTd Style="text-align:right">
                     <MudTooltip Text="@($"Write a value to {context.Id}")">

@@ -1,6 +1,7 @@
 @inherits LayoutComponentBase
 @implements IDisposable
 @using System.Net.Http.Json
+@using HinoGateway.Web.Services
 @inject HttpClient Http
 @inject IJSRuntime JS
 
@@ -18,13 +19,13 @@
         </div>
         <div class="d-flex flex-column" style="line-height:1.1">
             <MudText Typo="Typo.subtitle1" Style="font-weight:700;letter-spacing:.02em">HinoGateway</MudText>
-            <MudText Typo="Typo.caption" Style="opacity:.55;font-size:.65rem;letter-spacing:.14em;text-transform:uppercase">SCADA Gateway</MudText>
+            <MudText Typo="Typo.caption" Class="hino-muted" Style="font-size:.65rem;letter-spacing:.14em;text-transform:uppercase">SCADA Gateway</MudText>
         </div>
         <MudSpacer />
         <div class="hino-clock me-3" title="@($"Local time on this machine ({TimeZoneInfo.Local.StandardName})")">
-            <MudIcon Icon="@Icons.Material.Filled.Schedule" Size="Size.Small" Style="opacity:.6" />
+            <MudIcon Icon="@Icons.Material.Filled.Schedule" Size="Size.Small" Class="hino-muted" />
             <span>@_now.ToString("yyyy-MM-dd HH:mm:ss")</span>
-            <span style="opacity:.5;font-size:.7em">@_utcOffset</span>
+            <span class="hino-muted" style="font-size:.7em">@_utcOffset</span>
         </div>
         <MudTooltip Text="@(_isDark ? "Light theme" : "Dark theme")">
             <MudIconButton Icon="@(_isDark ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
@@ -56,12 +57,27 @@
         </MudNavMenu>
         <MudSpacer />
         <div class="hino-drawer-footer">
-            <MudText Typo="Typo.caption" Style="opacity:.45">HinoGateway v0.1 — Phase 1</MudText>
+            <MudText Typo="Typo.caption" Class="hino-muted">HinoGateway v0.1 — Phase 1</MudText>
         </div>
     </MudDrawer>
 
     <MudMainContent Class="hino-main">
         <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pt-5 px-5 pb-4">
+            @* Above the content, not beside it: every page below keeps rendering its last values
+               when the link drops, and without this an operator reads a dead number as a live one. *@
+            @if (!Connection.IsOnline)
+            {
+                <MudAlert Severity="Severity.Warning" Dense Class="mb-4"
+                          Icon="@Icons.Material.Filled.CloudOff">
+                    <b>Not connected to the gateway.</b>
+                    Everything below is the last value received@(LastSeen is null ? "" : $" at {LastSeen}")
+                    and is no longer updating.
+                    @if (!string.IsNullOrWhiteSpace(Connection.LastError))
+                    {
+                        <span class="hino-muted"> (@Connection.LastError)</span>
+                    }
+                </MudAlert>
+            }
             @Body
         </MudContainer>
     </MudMainContent>
@@ -93,7 +109,7 @@
             @if (_alarmsActive > 0 || _alarmsUnacked > 0)
             {
                 <span class="sb-alarm">@_alarmsActive active</span>
-                <span style="opacity:.6">/ @_alarmsUnacked unacked</span>
+                <span class="hino-muted">/ @_alarmsUnacked unacked</span>
             }
             else
             {
@@ -101,11 +117,17 @@
             }
         </a>
         <MudSpacer />
-        <span class="sb-item" style="opacity:.55">@_now.ToString("HH:mm:ss") @_utcOffset</span>
+        <span class="sb-item hino-muted">@_now.ToString("HH:mm:ss") @_utcOffset</span>
     </footer>
 </MudLayout>
 
 @code {
+    [Inject] private GatewayConnection Connection { get; set; } = default!;
+
+    private string? LastSeen => Connection.LastSuccess?.ToString("HH:mm:ss");
+
+    private void OnConnectionChanged() => InvokeAsync(StateHasChanged);
+
     private bool _drawerOpen = true;
     private bool _isDark = true; // industrial default: dark
     private System.Threading.Timer? _clockTimer;
@@ -126,6 +148,8 @@
 
     protected override void OnInitialized()
     {
+        Connection.Changed += OnConnectionChanged;
+
         _clockTimer = new System.Threading.Timer(_ =>
         {
             _now = DateTime.Now;
@@ -186,6 +210,7 @@
 
     public void Dispose()
     {
+        Connection.Changed -= OnConnectionChanged;
         _clockTimer?.Dispose();
         _healthTimer?.Dispose();
     }

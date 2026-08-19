@@ -323,6 +323,7 @@ public sealed class ConfigController : ControllerBase
     [HttpPost("import")]
     public async Task<ActionResult<ImportResult>> Import([FromBody] HinoProject project, [FromQuery] bool replace,
         [FromServices] IAlarmStore alarms, [FromServices] IEnumerable<IDeviceDriverFactory> factories,
+        [FromServices] ILogger<ConfigController> logger,
         CancellationToken ct)
     {
         if (!string.Equals(project.Format, HinoProject.FormatTag, StringComparison.OrdinalIgnoreCase))
@@ -330,7 +331,7 @@ public sealed class ConfigController : ControllerBase
         if (project.Version > HinoProject.CurrentVersion)
             return BadRequest($"Project version {project.Version} is newer than this server supports ({HinoProject.CurrentVersion}).");
 
-        JsonProjectStore.Normalise(project);
+        JsonProjectStore.Normalise(project, out var migrationNotes);
         if (replace)
         {
             project.Iec104 ??= new Iec104ServerOptions();
@@ -436,7 +437,14 @@ public sealed class ConfigController : ControllerBase
             tx.Commit();
         }
 
-        return new ImportResult(project.Devices.Count, groups.Count, tags.Count, project.Alarms.Count, removed);
+        // Returned rather than only logged: an upgraded file can arrive with control points that
+        // are writable because the old format said so, and the person importing it is the last one
+        // in a position to look before the gateway starts accepting commands for them.
+        foreach (var note in migrationNotes)
+            logger.LogWarning("Project import: {Note}", note);
+
+        return new ImportResult(project.Devices.Count, groups.Count, tags.Count, project.Alarms.Count, removed,
+            migrationNotes);
     }
 
     private static List<TagGroupDto> OrderParentsFirst(List<TagGroupDto> groups)
@@ -494,5 +502,6 @@ public sealed class ConfigController : ControllerBase
         return result;
     }
 
-    public sealed record ImportResult(int Devices, int Groups, int Tags, int Alarms, int Removed);
+    public sealed record ImportResult(int Devices, int Groups, int Tags, int Alarms, int Removed,
+        IReadOnlyList<string> MigrationNotes);
 }

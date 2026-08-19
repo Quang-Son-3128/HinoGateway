@@ -6,9 +6,8 @@ using Microsoft.AspNetCore.SignalR;
 namespace HinoGateway.Server.Services;
 
 /// <summary>
-/// Drains the alarm engine's event stream: records each batch in the local trail and pushes it
-/// (plus the refreshed outstanding list) to the alarm screens. Forwarding these events northbound
-/// (MQTT) will hook in here.
+/// Drains the alarm engine's event stream: records each batch in the local trail, forwards it
+/// northbound over MQTT, and pushes it (plus the refreshed outstanding list) to the alarm screens.
 ///
 /// The engine itself never touches storage or the network — it only writes to a bounded in-memory
 /// channel — so a slow consumer can never delay alarm evaluation on the polling threads.
@@ -23,11 +22,13 @@ public sealed class AlarmService : BackgroundService
     private readonly IHubContext<AlarmHub> _hub;
     private readonly ILogger<AlarmService> _logger;
     private readonly ComponentHealthRegistry _health;
+    private readonly MqttHostedService _mqtt;
 
     public AlarmService(AlarmEngine alarms, IAlarmJournal journal, IHubContext<AlarmHub> hub,
-        ComponentHealthRegistry health,
+        ComponentHealthRegistry health, MqttHostedService mqtt,
         ILogger<AlarmService> logger)
     {
+        _mqtt = mqtt;
         _alarms = alarms;
         _journal = journal;
         _hub = hub;
@@ -74,6 +75,10 @@ public sealed class AlarmService : BackgroundService
 
                 if (await RecordAsync(batch, ct))
                     _health.Heartbeat("alarm-journal");
+
+                // Northbound before the UI push: the local trail is a bounded ring in memory and the
+                // screens are transient, so this is the only copy that outlives a restart.
+                await _mqtt.ForwardAlarmsAsync(batch, ct);
 
                 try
                 {

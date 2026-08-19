@@ -42,6 +42,9 @@ public sealed class AccumulatorStateStore : IAccumulatorStateStore, IDisposable
     private readonly object _writeGate = new();
     private readonly Timer _flushTimer;
     private int _flushScheduled;
+
+    /// <summary>Delay before retrying a flush that failed. See <see cref="Retry"/>.</summary>
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(30);
     private bool _disposed;
 
     public AccumulatorStateStore(string path, ILogger logger, TimeSpan? debounce = null)
@@ -111,7 +114,7 @@ public sealed class AccumulatorStateStore : IAccumulatorStateStore, IDisposable
             {
                 DurableAtomicFile.WriteAllText(_path, JsonSerializer.Serialize(file, Json), _path + ".bak");
             }
-            catch (Exception ex)
+            catch (Exception ex) when (Retry(ex))
             {
                 // Not thrown at the caller: the accumulation itself is unaffected and still correct in
                 // memory, and taking the poll loop down over a failed sidecar write would be a much
@@ -122,33 +125,67 @@ public sealed class AccumulatorStateStore : IAccumulatorStateStore, IDisposable
         }
     }
 
+    /// <summary>
+    /// Schedule another attempt, then let the exception be handled by the block below. A failed
+    /// flush left nothing to try again: the timer is armed only by a new reading, so a counter that
+    /// had settled for the night could lose the whole day's baseline to one busy moment on the disk.
+    /// </summary>
+    private bool Retry(Exception ex)
+    {
+        if (_disposed)
+            return true;
+        if (Interlocked.CompareExchange(ref _flushScheduled, 1, 0) == 0)
+        {
+            try { _flushTimer.Change(RetryDelay, Timeout.InfiniteTimeSpan); }
+            catch (ObjectDisposedException) { }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Read the baselines, falling back to the <c>.bak</c> that <see cref="Flush"/> has been writing
+    /// all along and that nothing ever read. These numbers are the ones a utility bill is argued
+    /// from; losing a day of them because the primary file was truncated by a power cut, while an
+    /// intact copy sat unread beside it, is the failure this exists to prevent.
+    /// </summary>
     private void Load()
     {
-        if (!File.Exists(_path))
+        if (TryLoad(_path, primary: true))
             return;
+        if (File.Exists(_path + ".bak") && TryLoad(_path + ".bak", primary: false))
+            _logger.LogWarning("Energy baselines were restored from the backup {Path}.bak; " +
+                               "the primary file was unusable", _path);
+    }
+
+    private bool TryLoad(string path, bool primary)
+    {
+        if (!File.Exists(path))
+            return false;
 
         try
         {
-            var file = JsonSerializer.Deserialize<EnergyFile>(File.ReadAllText(_path), Json);
+            var file = JsonSerializer.Deserialize<EnergyFile>(File.ReadAllText(path), Json);
             if (file is null || !string.Equals(file.Format, FormatTag, StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogWarning("{Path} is not an energy-baseline file; ignoring it", _path);
-                return;
+                _logger.LogWarning("{Path} is not an energy-baseline file; ignoring it", path);
+                return false;
             }
 
             foreach (var (key, stored) in file.Sources)
                 _sources[key] = stored.ToState();
 
             _logger.LogInformation("Restored energy baselines for {Count} counter(s) from {Path}",
-                _sources.Count, _path);
+                _sources.Count, path);
+            return true;
         }
         catch (Exception ex)
         {
             // Deliberately not fatal. A gateway that refuses to start because it cannot read
             // yesterday's kWh is off the air entirely; one that starts and reports its totals as
             // Uncertain until the next midnight is still doing its job.
-            _logger.LogError(ex, "Could not read the energy baselines from {Path}; " +
-                                 "the current periods will restart from the next reading", _path);
+            _logger.Log(primary ? LogLevel.Warning : LogLevel.Error, ex,
+                "Could not read the energy baselines from {Path}", path);
+            return false;
         }
     }
 

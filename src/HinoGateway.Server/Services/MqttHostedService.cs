@@ -37,6 +37,26 @@ public sealed class MqttHostedService : IHostedService, IAsyncDisposable
 
     public Task StartAsync(CancellationToken cancellationToken) => ApplyAsync(cancellationToken);
 
+    /// <summary>
+    /// Forward alarm events northbound. Never throws and never blocks on the broker: the publisher
+    /// hands them to a durable spool and returns, so an alarm storm during a network outage costs
+    /// disk rather than delaying the alarm engine. A gateway with MQTT switched off does nothing.
+    /// </summary>
+    public async Task ForwardAlarmsAsync(IReadOnlyList<AlarmEvent> events, CancellationToken ct)
+    {
+        var publisher = _publisher;
+        if (publisher is null || events.Count == 0)
+            return;
+        try
+        {
+            await publisher.PublishAlarmsAsync(events, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "Could not spool {Count} alarm event(s) for MQTT", events.Count);
+        }
+    }
+
     public async Task<MqttPublisherStatus> ApplyAsync(CancellationToken ct)
     {
         await _gate.WaitAsync(ct);

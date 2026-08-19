@@ -64,6 +64,16 @@ public sealed class JsonlSampleHistory : ISampleHistory, IDisposable
     /// Synchronous work behind an asynchronous signature on purpose: this runs once a minute, the
     /// flush is the point of the method, and handing a few milliseconds of write-through I/O to a
     /// thread-pool thread is cheaper than the machinery needed to avoid it.
+    ///
+    /// <para>
+    /// A failure is counted, the handle is closed so the next frame reopens cleanly, and then it is
+    /// <em>rethrown</em>. It used to be swallowed, on the reasoning that a history frame is worth
+    /// less than the gateway producing it — which is true, and is why nothing here stops polling.
+    /// But the caller received a completed task either way, went on sending its heartbeat, and the
+    /// gateway reported itself healthy while a full or read-only disk quietly kept no record at all.
+    /// The sampler's supervised loop already knows how to report a failing component; it only ever
+    /// needed to be told.
+    /// </para>
     /// </summary>
     public Task AppendAsync(HistoryFrame frame, CancellationToken ct = default)
     {
@@ -83,11 +93,11 @@ public sealed class JsonlSampleHistory : ISampleHistory, IDisposable
             }
             catch (Exception ex)
             {
-                // A history frame is worth strictly less than the gateway that produces it: count the
-                // loss, close the handle so the next frame reopens cleanly, and carry on polling.
                 Interlocked.Increment(ref _dropped);
                 _logger.LogError(ex, "Could not append a history frame to {Directory}", _directory);
                 CloseOpenFile();
+                throw new IOException(
+                    $"Could not append a history frame to '{_directory}': {ex.Message}", ex);
             }
         }
         return Task.CompletedTask;
@@ -153,8 +163,11 @@ public sealed class JsonlSampleHistory : ISampleHistory, IDisposable
     //  Reading
     // =====================================================================================
 
+    public IAsyncEnumerable<HistoryFrame> ReadAsync(DateTimeOffset from, DateTimeOffset to,
+        CancellationToken ct = default) => ReadAsync(from, to, null, ct);
+
     public async IAsyncEnumerable<HistoryFrame> ReadAsync(DateTimeOffset from, DateTimeOffset to,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        IReadOnlySet<string>? tags, [EnumeratorCancellation] CancellationToken ct = default)
     {
         foreach (var file in FilesBetween(from, to))
         {
@@ -163,9 +176,14 @@ public sealed class JsonlSampleHistory : ISampleHistory, IDisposable
                 continue;
             while (await reader.ReadLineAsync(ct).ConfigureAwait(false) is { } line)
             {
-                if (TryParse(line) is not { } frame)
+                if (TryParse(line, tags) is not { } frame)
                     continue;
                 if (frame.Timestamp < from || frame.Timestamp > to)
+                    continue;
+                // A frame that holds none of the wanted tags is not a frame with no data; it is a
+                // frame this request is not about, and emitting it would make the caller filter
+                // again over a response it asked us to narrow.
+                if (tags is not null && frame.Values.Count == 0)
                     continue;
                 yield return frame;
             }
@@ -337,7 +355,7 @@ public sealed class JsonlSampleHistory : ISampleHistory, IDisposable
         }
     }
 
-    private static HistoryFrame? TryParse(string line)
+    private static HistoryFrame? TryParse(string line, IReadOnlySet<string>? wanted = null)
     {
         try
         {
@@ -353,6 +371,10 @@ public sealed class JsonlSampleHistory : ISampleHistory, IDisposable
             {
                 foreach (var property in v.EnumerateObject())
                 {
+                    // Tested before the value is decoded, not after: on a site with hundreds of tags
+                    // this is the difference between reading two numbers per line and all of them.
+                    if (wanted is not null && !wanted.Contains(property.Name))
+                        continue;
                     if (TrySample(property.Value) is { } sample)
                         values[property.Name] = sample;
                 }

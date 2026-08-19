@@ -312,6 +312,32 @@ public sealed class ModbusTcpDriver : IDeviceDriver, IDriverDiagnostics, ITransp
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Close the socket out from under whatever NModbus is doing on the poll thread.
+    ///
+    /// <para>
+    /// NModbus reads with <c>Transport.ReadTimeout</c> and no cancellation token, so a poll aimed at
+    /// a PLC that stopped answering is unreachable from the engine for <c>TimeoutMs × (Retries + 1)</c>.
+    /// Closing the handle makes that pending read fail at once; the exception surfaces out of
+    /// <see cref="PollAsync"/>, the loop sees its cancelled token and exits. Without this a reload
+    /// against a black-holed device left an abandoned worker and cost a process restart.
+    /// </para>
+    ///
+    /// <para>
+    /// Unlike every other member this runs on a different thread from the poll, so the fields are
+    /// read once into locals: <see cref="DisconnectAsync"/> may be nulling them at the same moment,
+    /// and disposing an already-disposed socket is fine while dereferencing a field that just became
+    /// null is not. Anything thrown is swallowed — this is the shutdown path, and there is nothing
+    /// left to report it to.
+    /// </para>
+    /// </summary>
+    public Task AbortAsync()
+    {
+        var socket = _tcp;
+        try { socket?.Close(); } catch { }
+        return Task.CompletedTask;
+    }
+
     public ValueTask DisposeAsync()
     {
         _master?.Dispose();

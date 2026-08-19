@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
 using HinoGateway.Server;
@@ -27,6 +28,15 @@ builder.Host.UseSerilog((context, services, logging) => logging
         fileSizeLimitBytes: Math.Max(1, context.Configuration.GetValue<int?>("Serilog:File:FileSizeLimitMb") ?? 32) * 1024L * 1024L,
         retainedFileCountLimit: context.Configuration.GetValue<int?>("Serilog:File:RetainedFileCountLimit") ?? 14,
         shared: true));
+
+// A background loop that faults must not end as a clean, silent stop. The default behaviour,
+// StopHost, unwinds the host tidily — after which a Windows service reports SERVICE_STOPPED with
+// exit code 0 and the recovery actions from `sc failure` never fire, so an unattended gateway stays
+// down until somebody drives out to it. Ignoring the fault keeps the process alive long enough for
+// GatewaySupervisorService to see the dead loop and end the process in a way a service manager acts
+// on. See GatewaySupervisorService.DeadBackgroundService.
+builder.Services.Configure<HostOptions>(options =>
+    options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore);
 
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
@@ -130,6 +140,27 @@ var security = builder.Configuration.GetSection("Security").Get<GatewaySecurityO
                ?? new GatewaySecurityOptions();
 GatewaySecurityValidation.Validate(security, builder.Configuration);
 builder.Services.AddSingleton(security);
+builder.Services.AddSingleton<AuthFailureTracker>();
+
+
+// Forwarded headers, and only from a proxy that was named in configuration. The framework default
+// trusts loopback, which is precisely the address a proxy sharing the IPC arrives from — so trusting
+// it implicitly would let any local process rewrite a caller's apparent origin. Starting from an
+// empty list means an undeclared proxy changes nothing here, and the header it leaves behind is what
+// tells the authentication handler the request was relayed at all.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownProxies.Clear();
+    options.KnownNetworks.Clear();
+    foreach (var proxy in GatewaySecurityValidation.ParseProxies(security))
+        options.KnownProxies.Add(proxy);
+    foreach (var (prefix, length) in GatewaySecurityValidation.ParseNetworks(security))
+        options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(prefix, length));
+    // One hop. A gateway sits behind the site's proxy, not behind a CDN chain, and every extra hop
+    // allowed is another address the caller gets to choose for themselves.
+    options.ForwardLimit = 1;
+});
 builder.Services.AddAuthentication(GatewayApiKeyHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, GatewayApiKeyHandler>(GatewayApiKeyHandler.SchemeName, _ => { });
 builder.Services.AddAuthorization(options =>
@@ -153,10 +184,16 @@ builder.Services.AddSingleton(commandOptions);
 builder.Services.AddSingleton<ControlCommandService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ControlCommandService>());
 
-// Driver factories â€” one registration per driver package. Add S7/IEC104/... here later.
+// Driver factories. The ones that ship with the gateway are registered here; anything dropped into
+// the drivers/ folder beside the executable is discovered at startup, so adding a protocol no longer
+// means rebuilding everything else. See DriverPlugins for what that trust boundary is and is not.
 builder.Services.AddSingleton<IDeviceDriverFactory, SimulatorDriverFactory>();
 builder.Services.AddSingleton<IDeviceDriverFactory, HinoGateway.Drivers.Modbus.ModbusTcpDriverFactory>();
 builder.Services.AddSingleton<IDeviceDriverFactory, HinoGateway.Drivers.SiemensS7.SiemensS7DriverFactory>();
+
+var plugins = DriverPlugins.Load(builder.Configuration["Drivers:Folder"]);
+foreach (var factory in plugins.Factories)
+    builder.Services.AddSingleton(factory);
 
 // Background services: start the engine, and bridge its updates to SignalR.
 builder.Services.AddHostedService<EngineHostedService>();
@@ -177,6 +214,28 @@ var app = builder.Build();
 app.Logger.LogInformation("Gateway data root: {DataRoot}", dataPaths.Root);
 if (GatewayDataPaths.PermissionWarning is { } permissionWarning)
     app.Logger.LogWarning("{Warning}", permissionWarning);
+if (GatewaySecurityValidation.DescribeExposure(security, builder.Configuration) is { } exposure)
+    app.Logger.LogWarning("{Warning}", exposure);
+
+// A credential written into a configuration file is a credential in every copy of that file — the
+// support ticket, the backup, the colleague's laptop. The MQTT password is already kept out of the
+// project this way, and nothing was saying the same about the key that grants Admin over every PLC.
+foreach (var factory in plugins.Factories)
+    app.Logger.LogInformation("Loaded driver plugin '{Driver}' ({Type})",
+        factory.DriverType, factory.GetType().Assembly.GetName().Name);
+foreach (var problem in plugins.Problems)
+    app.Logger.LogWarning("Driver plugin: {Problem}", problem);
+
+foreach (var literal in security.ApiKeys.Where(k => !string.IsNullOrWhiteSpace(k.Key) && !SecretRef.IsReference(k.Key)))
+    app.Logger.LogWarning(
+        "API key '{Name}' is stored literally in configuration. Move it to the secret store and " +
+        "reference it as ${{secret:api.{Name}}} so it does not travel with copies of the file.",
+        literal.Name, literal.Name);
+
+// First in the pipeline: everything after this point — the HTTPS check, authentication, the rate
+// limiter's partition key, the audit trail's recorded origin — reads the caller's address and
+// scheme, and all four are wrong for a proxied request until this has run.
+app.UseForwardedHeaders();
 
 // Serve the Blazor WebAssembly client that this project references.
 app.UseBlazorFrameworkFiles();
@@ -213,6 +272,22 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 // SPA fallback: any unmatched route serves the Blazor host page.
 app.MapFallbackToFile("index.html");
 
-app.Run();
+// Startup failures — a port already held, a data directory that cannot be written, a project file
+// whose backup is unreadable too — leave through here. Exiting non-zero is what makes the service
+// manager retry instead of recording a successful run, and the log has to be flushed before the
+// process ends or the one line explaining why is the line that never reaches the disk.
+try
+{
+    app.Run();
+}
+catch (Exception ex)
+{
+    app.Logger.LogCritical(ex, "The gateway could not start and is exiting");
+    Environment.ExitCode = 1;
+}
+finally
+{
+    Log.CloseAndFlush();
+}
 
 public partial class Program;

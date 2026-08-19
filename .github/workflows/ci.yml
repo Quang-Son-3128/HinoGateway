@@ -1,0 +1,113 @@
+name: CI
+
+# The gate the 2026-08-17 review asked for. Two things it deliberately does that a default .NET
+# workflow does not:
+#
+#   * warnings fail the build. This repository has been at zero warnings throughout, and the moment
+#     one is tolerated the count only goes up — after which nobody reads them.
+#   * the chaos load test runs on every push. Two of the highest-severity defects found in this
+#     project were found by running it rather than by reading code: an IEC-104 station that could not
+#     bind used to stop the whole gateway, and a leak check that passed on a negative heap reading.
+#     Unit tests would not have caught either.
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest   # the deployment target is a Windows industrial PC
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore HinoGateway.sln
+
+      - name: Build (Release, warnings are errors)
+        run: dotnet build HinoGateway.sln --no-restore -c Release -warnaserror
+
+      - name: Unit and recovery tests
+        run: >
+          dotnet test tests/HinoGateway.Engine.Tests/HinoGateway.Engine.Tests.csproj
+          --no-build -c Release --blame-hang-timeout 120s
+          --logger "trx;LogFileName=engine.trx"
+
+      - name: API and authorisation tests
+        run: >
+          dotnet test tests/HinoGateway.Api.Tests/HinoGateway.Api.Tests.csproj
+          --no-build -c Release --blame-hang-timeout 180s
+          --logger "trx;LogFileName=api.trx"
+
+      - name: Load test — quick
+        run: >
+          dotnet run --project tests/HinoGateway.LoadTests/HinoGateway.LoadTests.csproj
+          --no-build -c Release -- quick
+
+      - name: Load test — chaos
+        run: >
+          dotnet run --project tests/HinoGateway.LoadTests/HinoGateway.LoadTests.csproj
+          --no-build -c Release -- chaos
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'
+          if-no-files-found: ignore
+
+  dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore HinoGateway.sln
+
+      # A gateway on a plant network is not patched on anybody's schedule but this project's, so a
+      # known vulnerability in a transitive package has to surface here rather than in an audit.
+      - name: Vulnerable packages
+        run: |
+          dotnet list HinoGateway.sln package --vulnerable --include-transitive 2>&1 | tee audit.txt
+          if grep -q "has the following vulnerable packages" audit.txt; then
+            echo "::error::A referenced package has a known vulnerability — see the log above."
+            exit 1
+          fi
+
+      - name: Deprecated packages (advisory)
+        continue-on-error: true
+        run: dotnet list HinoGateway.sln package --deprecated --include-transitive
+
+  cross-platform:
+    # The gateway is systemd-aware and ships a Dockerfile, so Linux is a supported target and has to
+    # keep compiling. It is not where the tests run, because that is not where it is deployed.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build for linux-x64
+        run: dotnet build HinoGateway.sln -c Release -warnaserror

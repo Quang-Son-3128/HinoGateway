@@ -16,13 +16,50 @@ public static class Scaling
 
     public static TagValue Apply(TagDefinition tag, TagValue value)
     {
-        if (IsIdentity(tag) || value.Quality != Quality.Good || value.Value is null)
+        if (value.Quality != Quality.Good || value.Value is null)
             return value;
 
         if (!TryToDouble(value.Value, out var raw))
             return value; // bool/string — not scalable
 
-        return value with { Value = Rescale(raw, tag.Scale, tag.Offset, invert: false) };
+        if (!double.IsFinite(raw))
+            return NotFinite(value, raw, scaled: false);
+
+        if (IsIdentity(tag))
+            return value;
+
+        var scaled = Rescale(raw, tag.Scale, tag.Offset, invert: false);
+
+        // Scaling can produce an infinity the device never sent: a huge raw value times a large
+        // scale factor overflows, and the result is then perfectly well-formed nonsense.
+        return double.IsFinite(scaled)
+            ? value with { Value = scaled }
+            : NotFinite(value, raw, scaled: true);
+    }
+
+    /// <summary>
+    /// A reading that is not a number is not a good reading.
+    ///
+    /// <para>
+    /// A Float32 register holding a NaN — an uninitialised value, a sensor the PLC has marked
+    /// invalid, a divide by zero in the device's own logic — used to arrive with
+    /// <see cref="Quality.Good"/> and travel unchanged into alarm evaluation, MQTT and IEC-104.
+    /// Every comparison against NaN is false, so a high-limit alarm on that tag simply never fires:
+    /// the point reads as healthy and in range precisely because its value is meaningless. Marking
+    /// it <see cref="Quality.Bad"/> is what turns a silent hole into something the operator sees.
+    /// </para>
+    /// </summary>
+    private static TagValue NotFinite(TagValue value, double raw, bool scaled)
+    {
+        var what = double.IsNaN(raw) ? "not a number" : "infinite";
+        return value with
+        {
+            Value = null,
+            Quality = Quality.Bad,
+            StatusText = scaled
+                ? $"Scaling overflowed: the raw value {raw} does not convert to a finite engineering value."
+                : $"The device returned a value that is {what}.",
+        };
     }
 
     /// <summary>
@@ -42,9 +79,20 @@ public static class Scaling
             return false;
         }
 
-        // Booleans are not scaled in either direction; hand them straight to the driver.
-        if (tag.DataType == DataType.Bool || engineering is bool)
-            return true;
+        // Booleans are not scaled in either direction, but they are type-checked here rather than
+        // handed to the driver as-is. See ToRawBool.
+        if (tag.DataType == DataType.Bool)
+            return ToRawBool(tag, engineering, out raw, out error);
+
+        // The mirror image, and the reason this is a refusal rather than a conversion: true reaching
+        // a holding register used to be written as 1. That is a guess about what the caller meant,
+        // made at the last moment before the value leaves for the PLC, and on a setpoint the guess
+        // is indistinguishable from a deliberate command to set it to one.
+        if (engineering is bool)
+        {
+            error = $"Tag '{tag.Name}' is {tag.DataType}, so true/false is not a value it can take. Send a number.";
+            return false;
+        }
 
         if (!TryToDouble(engineering, out var eng))
         {
@@ -83,6 +131,65 @@ public static class Scaling
 
         raw = typed!;
         return true;
+    }
+
+    /// <summary>
+    /// The value a Bool tag may be commanded with — <c>true</c>/<c>false</c>, the numbers 0 and 1,
+    /// or those four written as text. Everything else is refused.
+    ///
+    /// <para>
+    /// The refusal is the point. This used to pass the caller's value straight through, and the
+    /// Modbus codec ends in <c>Convert.ToDouble(value) != 0</c> — so a 2 typed into the write dialog,
+    /// an off-by-one index, or a stale reading fed back through an automation script all closed the
+    /// coil. On a breaker or a start/stop point that is an energisation nobody asked for, and the
+    /// audit trail would faithfully record it as a successful write of the value 2.
+    /// </para>
+    ///
+    /// <para>
+    /// 0 and 1 are accepted because a coil is universally written that way in the field and by every
+    /// Modbus tool an engineer already owns; refusing them would be pedantry that gets worked around.
+    /// 2 is not "on" in any convention, and neither is 0.5 or NaN.
+    /// </para>
+    /// </summary>
+    private static bool ToRawBool(TagDefinition tag, object engineering, out object raw, out string? error)
+    {
+        raw = false;
+        error = null;
+
+        switch (engineering)
+        {
+            case bool value:
+                raw = value;
+                return true;
+
+            case string text when bool.TryParse(text.Trim(), out var parsed):
+                raw = parsed;
+                return true;
+
+            case string text when text.Trim() is "0" or "1":
+                raw = text.Trim() == "1";
+                return true;
+
+            case string text:
+                error = $"'{text}' is not a value for the Bool tag '{tag.Name}'. Use true, false, 1 or 0.";
+                return false;
+
+            default:
+                if (!TryToDouble(engineering, out var number))
+                {
+                    error = $"A {engineering.GetType().Name} cannot be written to the Bool tag '{tag.Name}'. " +
+                            "Use true, false, 1 or 0.";
+                    return false;
+                }
+                if (number is 0 or 1)
+                {
+                    raw = number == 1;
+                    return true;
+                }
+                error = $"{number} is not a value for the Bool tag '{tag.Name}'. Use true, false, 1 or 0 — " +
+                        "any other number would silently be treated as ON.";
+                return false;
+        }
     }
 
     /// <summary>

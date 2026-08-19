@@ -91,12 +91,27 @@ exiting for the service manager to restart it.
 ## Control safety and version 7 migration
 
 Every writable tag has an `AllowWrite` switch and optional engineering-unit min/max. It is off by
-default. IEC-104 also has a station-wide `AllowCommands` switch, per-point command type, source CIDR
-allow-list, bounded command queue and deadline. Commands are serialized per device connection, so
-their admission order is preserved without blocking unrelated PLCs.
+default. A Bool tag is written strictly: `true`, `false`, `1` or `0` and nothing else, so a stray `2`
+cannot close a coil. IEC-104 also has a station-wide `AllowCommands` switch, per-point command type,
+source CIDR allow-list, bounded command queue and deadline.
+
+Commands are queued per device: one queue per physical connection, so their admission order towards
+that device is preserved, and a device that has stopped answering delays only commands aimed at
+itself. Admission capacity is global.
 
 Project format version 7 changes old Single/Double IEC controls to select-before-operate (SBO).
-Migration deliberately does not turn `AllowWrite` on. Before applying an upgraded project:
+
+Migration **does** set `AllowWrite` on tags that a version 6 file had already mapped as IEC command
+points. That is not a new permission: in version 6, mapping a point as commandable *was* the
+permission, and the two switches were only split apart in version 7. Dropping it on the way through
+would silently make every control point read-only and get the file rejected by validation — a
+restore from a `.hino` backup would fail with a message about a safety switch rather than about the
+file's age.
+
+Every tag changed this way is named in a warning, logged at load and returned in the `import`
+response as `migrationNotes`. Read that list: it is the complete set of points that an upgraded
+project can command, and the last chance to review them before the gateway starts accepting
+commands for them. Before applying an upgraded project:
 
 1. Export and archive the current project and data root.
 2. Review every tag with `AllowWrite: true`, its write limits and its IEC mapping.
@@ -163,5 +178,5 @@ managed-memory checkpoints. Run the 30-minute soak on the target IPC before rele
 | `HinoGateway.Northbound.*` | IEC-104 controlled station and MQTT publisher/spool |
 | `HinoGateway.Storage` | JSON project, secrets and retentive values |
 | `HinoGateway.Server` | Host, API, security, health, audit and supervisors |
-| `HinoGateway.Web` | Browser UI |
+| `HinoGateway.Web` | Browser UI — conventions in [`docs/UI_GUIDELINES.md`](docs/UI_GUIDELINES.md) |
 | `tests/*` | Unit/recovery tests and load profiles |

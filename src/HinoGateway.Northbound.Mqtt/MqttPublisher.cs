@@ -17,6 +17,10 @@ public sealed class MqttPublisher : IAsyncDisposable
     private readonly MqttPublisherOptions _options;
     private readonly IMqttDiskSpool _spool;
     private readonly ILogger<MqttPublisher> _logger;
+
+    /// <summary>Alarm events, spooled and sent separately from telemetry. Null in the unit tests
+    /// that only exercise the telemetry path.</summary>
+    private readonly IMqttDiskSpool? _alarmSpool;
     private readonly ConcurrentDictionary<string, TagRead> _pending = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _spoolReady = new(0, 1);
     private readonly IMqttClient _client;
@@ -37,11 +41,22 @@ public sealed class MqttPublisher : IAsyncDisposable
 
     public MqttPublisher(MqttPublisherOptions options, TagStore tags, string spoolDirectory,
         ILogger<MqttPublisher> logger, MqttLoopHealth? loopHealth = null)
-        : this(options, tags, new MqttDiskSpool(spoolDirectory, options.MaxSpoolBytes), logger, loopHealth) { }
+        : this(options, tags,
+            new MqttDiskSpool(spoolDirectory, options.MaxSpoolBytes,
+                logger: message => logger.LogError("{Message}", message)),
+            logger, loopHealth,
+            // A separate directory rather than a separate topic on one queue: the spool is a FIFO of
+            // opaque bytes with the topic applied at send time, so two destinations need two queues.
+            // It also means a telemetry backlog cannot consume the alarm stream's size budget.
+            new MqttDiskSpool(Path.Combine(spoolDirectory, "alarms"),
+                Math.Max(1024 * 1024, options.MaxSpoolBytes / 8),
+                logger: message => logger.LogError("{Message}", message))) { }
 
     internal MqttPublisher(MqttPublisherOptions options, TagStore tags, IMqttDiskSpool spool,
-        ILogger<MqttPublisher> logger, MqttLoopHealth? loopHealth = null)
+        ILogger<MqttPublisher> logger, MqttLoopHealth? loopHealth = null,
+        IMqttDiskSpool? alarmSpool = null)
     {
+        _alarmSpool = alarmSpool;
         _options = options;
         _logger = logger;
         _spool = spool;
@@ -186,7 +201,16 @@ public sealed class MqttPublisher : IAsyncDisposable
                     EnsureConnectSucceeded(connect.ResultCode, connect.ReasonString);
                     _lastConnectedAt = DateTimeOffset.UtcNow;
                 }
-                var item = await _spool.PeekAsync(ct);
+                // Alarms first. They are rare, they are what an operator is waiting for, and letting
+                // them queue behind a telemetry backlog that built up during an outage would deliver
+                // the trip message minutes after the trip.
+                var fromAlarms = true;
+                var item = _alarmSpool is null ? null : await _alarmSpool.PeekAsync(ct);
+                if (item is null)
+                {
+                    fromAlarms = false;
+                    item = await _spool.PeekAsync(ct);
+                }
                 if (item is null)
                 {
                     await _spoolReady.WaitAsync(TimeSpan.FromSeconds(1), ct);
@@ -195,7 +219,7 @@ public sealed class MqttPublisher : IAsyncDisposable
                 }
 
                 var message = new MqttApplicationMessageBuilder()
-                    .WithTopic(_options.PublishTopic)
+                    .WithTopic(fromAlarms ? AlarmTopic() : _options.PublishTopic)
                     .WithPayload(item.Payload)
                     .WithQualityOfServiceLevel((MqttQualityOfServiceLevel)Math.Clamp(_options.QoS, 0, 2))
                     .WithRetainFlag(_options.Retain)
@@ -203,7 +227,7 @@ public sealed class MqttPublisher : IAsyncDisposable
                     .Build();
                 var publish = await _client.PublishAsync(message, ct);
                 EnsurePublishSucceeded(publish);
-                await _spool.CompleteAsync(item, ct);
+                await (fromAlarms ? _alarmSpool!.CompleteAsync(item, ct) : _spool.CompleteAsync(item, ct));
                 // A TCP/MQTT handshake is not proof that the broker accepts this publisher. Preserve
                 // exponential backoff until one message has been acknowledged and durably removed
                 // from the spool; otherwise an ACL/authentication failure reconnects every second.
@@ -234,6 +258,27 @@ public sealed class MqttPublisher : IAsyncDisposable
                 backoff = Math.Min(backoff * 2, backoffMax);
             }
         }
+    }
+
+    /// <summary>Alarm topic, falling back to a suffix of the telemetry topic if it was left blank.</summary>
+    private string AlarmTopic() => string.IsNullOrWhiteSpace(_options.AlarmTopic)
+        ? $"{_options.PublishTopic.TrimEnd('/')}/alarms"
+        : _options.AlarmTopic;
+
+    /// <summary>
+    /// Hand a batch of alarm events to the durable spool. Returns without waiting for the broker:
+    /// the spool is what makes delivery survive an outage, and blocking the alarm engine on a
+    /// network that is down is precisely what the spool exists to avoid.
+    /// </summary>
+    public async Task PublishAlarmsAsync(IReadOnlyList<AlarmEvent> events, CancellationToken ct = default)
+    {
+        if (_alarmSpool is null || events.Count == 0 || !_options.Enabled)
+            return;
+
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new MqttAlarmBatch(
+            Guid.NewGuid().ToString("N"), Environment.MachineName, DateTimeOffset.UtcNow, events), Json);
+        await _alarmSpool.EnqueueAsync(payload, ct);
+        if (_spoolReady.CurrentCount == 0) _spoolReady.Release();
     }
 
     private async Task<bool> WaitForUpdatesAsync<T>(System.Threading.Channels.ChannelReader<T> reader,
@@ -285,10 +330,41 @@ public sealed class MqttPublisher : IAsyncDisposable
             (string.IsNullOrWhiteSpace(result.ReasonString) ? "." : $" — {result.ReasonString}"));
     }
 
+    /// <summary>
+    /// The identity this gateway takes on the broker.
+    ///
+    /// <para>
+    /// The default used to be the literal <c>hinogateway</c> for every installation, and the client
+    /// connects with <c>CleanStart(false)</c> — so two gateways shipped with default settings did not
+    /// merely disconnect each other, they shared one persistent session. A QoS 1 message queued for
+    /// one could be delivered to the other, each takes the other's subscriptions, and both spend the
+    /// day in a reconnect loop writing their spools to the flash of an industrial PC. Falling back to
+    /// the machine name makes the default unique where it matters, which is every site with more than
+    /// one gateway.
+    /// </para>
+    /// </summary>
+    private string ClientId()
+    {
+        if (!string.IsNullOrWhiteSpace(_options.ClientId)
+            && !string.Equals(_options.ClientId, LegacySharedClientId, StringComparison.Ordinal))
+            return _options.ClientId;
+
+        var derived = $"hino-{Environment.MachineName}";
+        if (string.Equals(_options.ClientId, LegacySharedClientId, StringComparison.Ordinal))
+            _logger.LogWarning(
+                "MQTT ClientId is the old shared default '{Legacy}', which collides with any other " +
+                "gateway using it on the same broker. Connecting as '{Derived}' instead — set an " +
+                "explicit ClientId to choose your own.", LegacySharedClientId, derived);
+        return derived;
+    }
+
+    /// <summary>The default every installation used to ship with. Treated as "not set".</summary>
+    private const string LegacySharedClientId = "hinogateway";
+
     private MqttClientOptions BuildClientOptions()
     {
         var builder = new MqttClientOptionsBuilder()
-            .WithClientId(string.IsNullOrWhiteSpace(_options.ClientId) ? $"hino-{Environment.MachineName}" : _options.ClientId)
+            .WithClientId(ClientId())
             .WithTcpServer(_options.Broker, _options.Port)
             .WithCleanStart(false)
             .WithKeepAlivePeriod(TimeSpan.FromSeconds(30))
@@ -342,5 +418,12 @@ public sealed class MqttPublisher : IAsyncDisposable
 
 public sealed record MqttTelemetryBatch(string BatchId, string Gateway, DateTimeOffset Timestamp,
     IReadOnlyList<MqttTelemetrySample> Samples);
+
+/// <summary>
+/// Alarm events on the wire. Deliberately the same envelope shape as a telemetry batch — batch id,
+/// gateway, timestamp, then the payload — so a consumer written for one can read the other.
+/// </summary>
+public sealed record MqttAlarmBatch(string BatchId, string Gateway, DateTimeOffset Timestamp,
+    IReadOnlyList<AlarmEvent> Events);
 public sealed record MqttTelemetrySample(string Tag, object? Value, string Quality,
     DateTimeOffset SourceTimestamp, DateTimeOffset LastChanged, string? Status);

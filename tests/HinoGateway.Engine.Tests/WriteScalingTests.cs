@@ -95,6 +95,56 @@ public class WriteScalingTests
         Assert.Equal(true, raw);
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(1, true)]
+    [InlineData(0, false)]
+    [InlineData(1.0, true)]
+    [InlineData(0.0, false)]
+    [InlineData("true", true)]
+    [InlineData("False", false)]
+    [InlineData("1", true)]
+    [InlineData("0", false)]
+    public void A_bool_tag_takes_the_four_values_an_engineer_would_type(object supplied, bool expected)
+    {
+        Assert.True(Scaling.ToRaw(Tag(DataType.Bool), supplied, out var raw, out var error), error);
+        Assert.Equal(expected, raw);
+    }
+
+    [Theory]
+    [InlineData(2)]          // the one that started this: ModbusCodec turns any non-zero into ON
+    [InlineData(-1)]
+    [InlineData(0.5)]
+    [InlineData(double.NaN)]
+    [InlineData("on")]
+    [InlineData("yes")]
+    [InlineData("")]
+    public void A_bool_tag_refuses_everything_else_rather_than_guessing(object supplied)
+    {
+        Assert.False(Scaling.ToRaw(Tag(DataType.Bool), supplied, out _, out var error));
+        Assert.Contains("true, false, 1 or 0", error);
+    }
+
+    [Fact]
+    public void A_number_written_to_a_bool_tag_is_named_in_the_refusal()
+    {
+        // The operator has to be able to tell this from a rejected range or a read-only tag, because
+        // the fix is different: they typed a value the point cannot take.
+        Assert.False(Scaling.ToRaw(Tag(DataType.Bool), 2, out _, out var error));
+        Assert.Contains("silently be treated as ON", error);
+    }
+
+    [Theory]
+    [InlineData(DataType.Int16)]
+    [InlineData(DataType.Float32)]
+    [InlineData(DataType.UInt32)]
+    public void True_is_refused_by_a_numeric_tag_instead_of_being_written_as_one(DataType type)
+    {
+        Assert.False(Scaling.ToRaw(Tag(type), true, out _, out var error));
+        Assert.Contains("true/false", error);
+    }
+
     [Fact]
     public void Numeric_text_is_accepted_but_nonsense_is_not()
     {

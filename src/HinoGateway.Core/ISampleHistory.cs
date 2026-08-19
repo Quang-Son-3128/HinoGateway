@@ -62,6 +62,36 @@ public interface ISampleHistory
     IAsyncEnumerable<HistoryFrame> ReadAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default);
 
     /// <summary>
+    /// The same, keeping only <paramref name="tags"/> in each frame — null for all of them.
+    ///
+    /// <para>
+    /// The filter belongs down here rather than at the caller because the cost being avoided is the
+    /// parse, not the copy. A frame on a large site names hundreds of tags; building a dictionary of
+    /// all of them so that the API can keep two is most of the work of the request, repeated for
+    /// every frame in the range. The default implementation exists so that an <c>ISampleHistory</c>
+    /// which cannot do better is still correct.
+    /// </para>
+    /// </summary>
+    async IAsyncEnumerable<HistoryFrame> ReadAsync(DateTimeOffset from, DateTimeOffset to,
+        IReadOnlySet<string>? tags,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await foreach (var frame in ReadAsync(from, to, ct).ConfigureAwait(false))
+        {
+            if (tags is null)
+            {
+                yield return frame;
+                continue;
+            }
+            var kept = frame.Values
+                .Where(v => tags.Contains(v.Key))
+                .ToDictionary(v => v.Key, v => v.Value, StringComparer.Ordinal);
+            if (kept.Count > 0)
+                yield return frame with { Values = kept };
+        }
+    }
+
+    /// <summary>
     /// The sample of <paramref name="tagId"/> closest to <paramref name="at"/>, if one exists within
     /// <paramref name="tolerance"/> either side. This is how a period boundary gets a value that is
     /// honestly "the reading at midnight" rather than "the first reading after we came back up".

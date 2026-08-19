@@ -69,8 +69,9 @@ public sealed class DeviceWorker : IAsyncDisposable
     /// <summary>
     /// How long a reload or shutdown waits for one device loop. Long enough for a poll in flight on
     /// a slow link to finish, short enough that one dead device cannot hold up the whole fleet.
+    /// Shared with the drivers, whose configuration validation is written against the same number.
     /// </summary>
-    private static readonly TimeSpan StopDeadline = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan StopDeadline = DriverLimits.StopDeadline;
 
     public void Start()
     {
@@ -344,6 +345,20 @@ public sealed class DeviceWorker : IAsyncDisposable
         try
         {
             _cts?.Cancel();
+
+            // Cancelling only helps a driver that can see the token. Ask the driver to break its
+            // link as well, before the clock below starts: for a protocol library that reads with a
+            // socket timeout and no token, closing the socket is the only thing that ends the call,
+            // and the difference is between stopping in milliseconds and being abandoned.
+            try
+            {
+                await _driver.AbortAsync().WaitAsync(TimeSpan.FromSeconds(1));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Device {DeviceId}: abort request failed (ignored)", _config.DeviceId);
+            }
+
             if (_runTask is not null)
             {
                 // Bounded, because an unbounded await here is a hang: a driver that ignores

@@ -1,0 +1,371 @@
+@page "/commands"
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService Dialog
+
+<PageTitle>HinoGateway — Commands</PageTitle>
+
+<div class="page-head">
+    <h1>Commands</h1>
+    <MudSpacer />
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewCommand" Disabled="_busy">
+        New command
+    </MudButton>
+</div>
+
+<MudText Typo="Typo.body2" Class="mb-3 hino-dim">
+    A command runs when a tag is written and writes on to the plant. This is what carries a setpoint
+    from the control centre — which arrives in a memory tag mapped to an IEC-104 point — into the
+    register the equipment actually reads.
+</MudText>
+
+<MudPaper Elevation="0" Outlined Class="mb-4">
+    <MudTable Items="_commands" Dense Hover Elevation="0" Breakpoint="Breakpoint.Sm">
+        <HeaderContent>
+            <MudTh Style="width:2rem"></MudTh>
+            <MudTh>Name</MudTh>
+            <MudTh>Runs when this tag changes</MudTh>
+            <MudTh>Writes</MudTh>
+            <MudTh>Last run</MudTh>
+            <MudTh>Result</MudTh>
+            <MudTh Style="text-align:right">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>
+                <span class="led @(context.Command.Enabled ? "led-good" : "led-idle")"></span>
+            </MudTd>
+            <MudTd DataLabel="Name">
+                @context.Command.Name
+                @if (!context.Command.Enabled)
+                {
+                    <MudText Typo="Typo.caption" Class="hino-muted">(disabled)</MudText>
+                }
+                <MudText Typo="Typo.caption" Class="hino-dim d-block">@context.Command.Description</MudText>
+            </MudTd>
+            <MudTd DataLabel="Trigger"><span class="mono txt-sm">@context.Command.TriggerTagPath</span></MudTd>
+            <MudTd DataLabel="Writes">
+                <span class="mono txt-sm">@(context.Writes.Count == 0 ? "—" : string.Join(", ", context.Writes))</span>
+            </MudTd>
+            <MudTd DataLabel="Last run">
+                <span class="mono txt-sm hino-dim">
+                    @(context.LastRun is null ? "never" : FormatLocal(context.LastRun.At))
+                </span>
+            </MudTd>
+            <MudTd DataLabel="Result">
+                @if (context.LastRun is { } run)
+                {
+                    <span class="mono txt-sm" style="color:@(run.Succeeded ? "var(--hino-good)" : "var(--hino-bad)")">
+                        @(run.Succeeded ? $"wrote {run.Writes.Count}" : "failed")
+                    </span>
+                    @if (!run.Succeeded && run.Error is not null)
+                    {
+                        <MudTooltip Text="@run.Error">
+                            <MudText Typo="Typo.caption" Color="Color.Error" Class="hino-ellipsis d-block"
+                                     Style="max-width:18rem">@run.Error</MudText>
+                        </MudTooltip>
+                    }
+                }
+            </MudTd>
+            <MudTd DataLabel="Actions" Style="text-align:right">
+                <MudTooltip Text="Dry run — shows what it would write, writes nothing">
+                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small"
+                                   OnClick="@(() => OpenTest(context))" Disabled="_busy" />
+                </MudTooltip>
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                               OnClick="@(() => Edit(context.Command))" Disabled="_busy" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                               OnClick="@(() => DeleteAsync(context.Command))" Disabled="_busy" />
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <div class="alarm-empty">
+                <MudIcon Icon="@Icons.Material.Filled.Bolt" Class="hino-empty-icon" />
+                <MudText Typo="Typo.subtitle1">No commands</MudText>
+                <MudText Typo="Typo.caption" Class="hino-muted">
+                    Add one when a value written from outside — a curtailment setpoint, a mode switch —
+                    has to be turned into something the equipment understands.
+                </MudText>
+            </div>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@if (_edit is not null)
+{
+    <MudPaper Class="pa-4 hino-panel-accent" Elevation="0" Outlined>
+        <MudText Typo="Typo.h6" Class="mb-3">
+            <MudIcon Icon="@(_isNew ? Icons.Material.Filled.Add : Icons.Material.Filled.Edit)" Size="Size.Small" Class="me-1" />
+            @(_isNew ? "New command" : $"Edit {_edit.Name}")
+        </MudText>
+
+        <div class="d-flex flex-wrap mb-3" style="gap:1rem">
+            <MudTextField T="string" @bind-Value="_edit.Name" Label="Name" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Style="min-width:14rem" />
+            <MudSelect T="string" @bind-Value="_edit.TriggerTagId" Label="Runs when this tag changes"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:20rem">
+                @foreach (var tag in _writableTags)
+                {
+                    <MudSelectItem T="string" Value="@tag.Id">@tag.Path</MudSelectItem>
+                }
+            </MudSelect>
+            <MudTextField T="string" @bind-Value="_edit.Description" Label="Description"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:20rem" />
+            <MudSwitch T="bool" @bind-Value="_edit.Enabled" Color="Color.Primary" Label="Enabled" />
+        </div>
+
+        <MudTextField T="string" @bind-Value="_edit.Script" @bind-Value:after="CheckAsync"
+                      Label="Script" Variant="Variant.Outlined" Lines="10" Class="mono" Immediate
+                      DebounceInterval="400" />
+
+        <div class="d-flex align-center flex-wrap mt-2" style="gap:.75rem">
+            @if (_check is not null)
+            {
+                <MudIcon Icon="@(_check.Ok ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
+                         Size="Size.Small" Style="@($"color:{(_check.Ok ? "var(--hino-good)" : "var(--hino-bad)")}")" />
+                <MudText Typo="Typo.caption" Style="@($"color:{(_check.Ok ? "var(--hino-good)" : "var(--hino-bad)")}")">
+                    @(_check.Ok ? "The script is valid." : _check.Error)
+                </MudText>
+                @if (_check.Ok && _check.Writes.Count > 0)
+                {
+                    <MudText Typo="Typo.caption" Class="mono hino-dim">
+                        writes @string.Join(", ", _check.Writes)
+                    </MudText>
+                }
+            }
+        </div>
+
+        <MudText Typo="Typo.caption" Class="hino-muted d-block mt-2">
+            <span class="mono">value</span> is what was just written into the trigger tag.
+            <span class="mono">Tag("path")</span> reads, <span class="mono">Write("path", …)</span> writes —
+            both need the path spelled out, so the gateway knows what a command touches before it runs.
+            <span class="mono">var</span>, <span class="mono">if</span>/<span class="mono">else</span> and
+            <span class="mono">return;</span> are available. There are no loops.
+        </MudText>
+
+        <div class="d-flex mt-3" style="gap:.5rem">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                       OnClick="SaveAsync" Disabled="_busy">Save</MudButton>
+            <MudButton Variant="Variant.Text" OnClick="() => _edit = null" Disabled="_busy">Cancel</MudButton>
+        </div>
+    </MudPaper>
+}
+
+@if (_testing is not null)
+{
+    <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined>
+        <MudText Typo="Typo.h6" Class="mb-1">
+            <MudIcon Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Class="me-1" />
+            Dry run — @_testing.Command.Name
+        </MudText>
+        <MudText Typo="Typo.caption" Class="hino-muted mb-3 d-block">
+            Runs the script against the live values and lists what it <em>would</em> write. Nothing is
+            sent to any device.
+        </MudText>
+
+        <div class="d-flex align-center flex-wrap" style="gap:.75rem">
+            <MudTextField T="string" @bind-Value="_testValue" Label="Value written to the trigger tag"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:16rem" Class="mono" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="RunTestAsync" Disabled="_busy">Run</MudButton>
+            <MudButton Variant="Variant.Text" OnClick="() => _testing = null" Disabled="_busy">Close</MudButton>
+        </div>
+
+        @if (_testResult is not null)
+        {
+            <MudAlert Severity="@(_testResult.Completed ? Severity.Success : Severity.Warning)"
+                      Variant="Variant.Outlined" Dense Class="mt-3">
+                @(_testResult.Completed
+                    ? $"The script completed and would write {_testResult.Writes.Count} tag(s)."
+                    : $"The script stopped: {_testResult.Error}")
+            </MudAlert>
+            @if (_testResult.Writes.Count > 0)
+            {
+                <MudSimpleTable Dense Elevation="0" Class="mt-2">
+                    <thead><tr><th>Tag</th><th style="text-align:right">Value</th></tr></thead>
+                    <tbody>
+                    @foreach (var write in _testResult.Writes)
+                    {
+                        <tr>
+                            <td class="mono txt-sm">@write.TagPath</td>
+                            <td class="mono txt-sm" style="text-align:right">@write.Value</td>
+                        </tr>
+                    }
+                    </tbody>
+                </MudSimpleTable>
+            }
+        }
+    </MudPaper>
+}
+
+@code {
+    private List<CommandView> _commands = new();
+    private List<TagDto> _writableTags = new();
+    private CommandDto? _edit;
+    private bool _isNew;
+    private bool _busy;
+    private CheckResult? _check;
+
+    private CommandView? _testing;
+    private string _testValue = "0";
+    private TestResult? _testResult;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _commands = await Http.GetFromJsonAsync<List<CommandView>>("api/commands") ?? new();
+            // Only a writable tag can be a trigger: nothing could ever start a command on a tag that
+            // the gateway refuses to write, so offering one would only produce a saved command that
+            // never runs.
+            var tags = await Http.GetFromJsonAsync<List<TagDto>>("api/config/tags") ?? new();
+            _writableTags = tags.Where(t => t.AllowWrite).OrderBy(t => t.Path, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        catch (Exception ex) when (ApiResponseErrors.IsUnauthorized(ex))
+        {
+            // Reported centrally; the layout asks for the key.
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("Could not load the commands: " + ex.Message, Severity.Error);
+        }
+        StateHasChanged();
+    }
+
+    private void NewCommand()
+    {
+        _isNew = true;
+        _check = null;
+        _edit = new CommandDto
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = "",
+            Enabled = true,
+            Script = "Write(\"\", value);",
+        };
+    }
+
+    private void Edit(CommandDto command)
+    {
+        _isNew = false;
+        _check = null;
+        _edit = new CommandDto
+        {
+            Id = command.Id, Name = command.Name, Description = command.Description,
+            Enabled = command.Enabled, TriggerTagId = command.TriggerTagId, Script = command.Script,
+        };
+        _ = CheckAsync();
+    }
+
+    /// <summary>As-you-type check, the same one the formula editor does.</summary>
+    private async Task CheckAsync()
+    {
+        if (_edit is null || string.IsNullOrWhiteSpace(_edit.Script)) { _check = null; return; }
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/commands/check", _edit);
+            _check = response.IsSuccessStatusCode
+                ? await response.Content.ReadFromJsonAsync<CheckResult>()
+                : null;
+        }
+        catch
+        {
+            _check = null;   // the offline banner already says why
+        }
+        StateHasChanged();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_edit is null) return;
+        if (string.IsNullOrWhiteSpace(_edit.Name)) { Snackbar.Add("A name is required.", Severity.Warning); return; }
+        if (string.IsNullOrWhiteSpace(_edit.TriggerTagId)) { Snackbar.Add("Pick the tag that starts this command.", Severity.Warning); return; }
+
+        _busy = true;
+        try
+        {
+            var response = await Http.PutAsJsonAsync($"api/commands/{_edit.Id}", _edit);
+            if (!response.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"Save failed: {await ApiResponseErrors.ReadAsync(response)}", Severity.Error);
+                return;
+            }
+            _edit = null;
+            await LoadAsync();
+            // Commands run off the live tag store, so saving is applying — there is no engine to rebuild.
+            Snackbar.Add("Saved and running.", Severity.Success);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteAsync(CommandDto command)
+    {
+        var ok = await Dialog.ShowMessageBoxAsync("Delete command",
+            $"Delete '{command.Name}'? Whatever it was keeping in step stops being written.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return;
+
+        _busy = true;
+        try
+        {
+            var response = await Http.DeleteAsync($"api/commands/{command.Id}");
+            if (!response.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"Delete failed: {await ApiResponseErrors.ReadAsync(response)}", Severity.Error);
+                return;
+            }
+            await LoadAsync();
+            Snackbar.Add($"Deleted '{command.Name}'.", Severity.Info);
+        }
+        finally { _busy = false; }
+    }
+
+    private void OpenTest(CommandView command)
+    {
+        _testing = command;
+        _testResult = null;
+    }
+
+    private async Task RunTestAsync()
+    {
+        if (_testing is null) return;
+        _busy = true;
+        try
+        {
+            var response = await Http.PostAsJsonAsync($"api/commands/{_testing.Command.Id}/test",
+                new { Value = _testValue });
+            if (!response.IsSuccessStatusCode)
+            {
+                Snackbar.Add(await ApiResponseErrors.ReadAsync(response), Severity.Error);
+                return;
+            }
+            _testResult = await response.Content.ReadFromJsonAsync<TestResult>();
+        }
+        finally { _busy = false; }
+    }
+
+    /// <summary>Local time — the operator's, per the UI guidelines.</summary>
+    private static string FormatLocal(DateTimeOffset t)
+    {
+        var local = t.ToLocalTime();
+        return local.Date == DateTime.Now.Date
+            ? local.ToString("HH:mm:ss")
+            : local.ToString("dd/MM HH:mm:ss");
+    }
+
+    private sealed record CommandView(CommandDto Command, IReadOnlyList<string> Reads,
+        IReadOnlyList<string> Writes, RunInfo? LastRun);
+
+    private sealed record RunInfo(string CommandId, DateTimeOffset At, string? TriggerValue,
+        IReadOnlyList<WriteInfo> Writes, bool Succeeded, string? Error);
+
+    private sealed record WriteInfo(string TagPath, string? Value, bool Succeeded, string? Error);
+
+    private sealed record CheckResult(bool Ok, string? Error, int Position,
+        IReadOnlyList<string> Reads, IReadOnlyList<string> Writes);
+
+    private sealed record TestResult(bool Completed, IReadOnlyList<TestWrite> Writes, string? Error);
+
+    private sealed record TestWrite(string TagPath, string? Value);
+}

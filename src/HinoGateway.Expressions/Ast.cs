@@ -10,12 +10,20 @@ namespace HinoGateway.Expressions;
 /// </summary>
 public sealed class EvaluationContext
 {
-    public EvaluationContext(ITagValueSource tags, DateTimeOffset now, ExpressionMemory? memory = null)
+    public EvaluationContext(ITagValueSource tags, DateTimeOffset now, ExpressionMemory? memory = null,
+        IScriptVariables? variables = null)
     {
         Tags = tags;
         Now = now;
         Memory = memory;
+        Variables = variables;
     }
+
+    /// <summary>
+    /// The locals of the command script this expression sits inside, or null in a formula - where a
+    /// bare word is not a value at all and the parser says so.
+    /// </summary>
+    public IScriptVariables? Variables { get; }
 
     public ITagValueSource Tags { get; }
 
@@ -94,6 +102,15 @@ public sealed class ExpressionMemory
         Array.Clear(_staged);
         LastEvaluatedAt = null;
     }
+}
+
+/// <summary>
+/// Where a command script's locals are read from. Implemented by <see cref="ScriptContext"/>; a
+/// formula has none, which is what makes a bare word a syntax error there and a variable here.
+/// </summary>
+public interface IScriptVariables
+{
+    bool TryGet(string name, out ExpressionValue value);
 }
 
 /// <summary>One node of a parsed expression. Evaluated by walking the tree.</summary>

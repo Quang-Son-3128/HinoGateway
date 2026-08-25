@@ -165,7 +165,19 @@
         <MudIcon Icon="@Icons.Material.Filled.FormatListNumbered" Size="Size.Small" Class="hino-muted" />
         <MudText Typo="Typo.subtitle2">Signal list</MudText>
         <MudText Typo="Typo.caption" Class="mono hino-muted">@_options.Points.Count</MudText>
+        @if (_selected.Count > 0)
+        {
+            <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined"
+                       StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteSelectedAsync" Disabled="_busy">
+                Remove selected (@_selected.Count)
+            </MudButton>
+        }
         <MudSpacer />
+        <MudTextField T="string" @bind-Value="_filter" @bind-Value:after="StateHasChanged"
+                      Placeholder="Filter by IOA or tag…" Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Small"
+                      Margin="Margin.Dense" Variant="Variant.Outlined" Clearable Immediate
+                      Style="max-width:14rem" />
         <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddPoint" Disabled="_busy">Add point</MudButton>
         <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
                    OnClick="@(() => Nav.NavigateTo("api/iec104/points/csv", forceLoad: true))">Export CSV</MudButton>
@@ -188,9 +200,40 @@
     }
     else
     {
-        <MudTable Items="_options.Points" Dense Hover Elevation="0" Breakpoint="Breakpoint.Sm"
-                  Virtualize FixedHeader Height="@(_options.Points.Count > 15 ? "50vh" : null)">
+        @* Grouped by the folder the mapped tag lives in. The signal list is flat in the file
+           because IEC-104 has no notion of folders, but the tags do — and a utility's list of 200
+           points is only navigable (or deletable) in the groups the plant is actually built from. *@
+        <MudTable Items="VisiblePoints" Dense Hover Elevation="0" Breakpoint="Breakpoint.Sm"
+                  GroupBy="_grouping" FixedHeader Height="@(_options.Points.Count > 15 ? "50vh" : null)">
+            <GroupHeaderTemplate>
+                <MudTh Class="mud-table-cell-custom-group" colspan="10">
+                    <div class="d-flex align-center" style="gap:.6rem">
+                        <MudCheckBox T="bool?" Value="GroupChecked(context.Items)" Size="Size.Small" Dense
+                                     ValueChanged="@(v => ToggleGroup(context.Items, v == true))" />
+                        @if (IsOrphanGroup(context.Key?.ToString()))
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.Warning" Size="Size.Small" Style="color:var(--hino-bad)" />
+                            <span style="color:var(--hino-bad)">@context.Key</span>
+                        }
+                        else
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" Class="hino-muted" />
+                            <span class="mono">@context.Key</span>
+                        }
+                        <MudText Typo="Typo.caption" Class="hino-muted">
+                            @context.Items.Count() point(s) · IOA @IoaRange(context.Items)
+                        </MudText>
+                        <MudSpacer />
+                        <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Text"
+                                   StartIcon="@Icons.Material.Filled.Delete" Disabled="_busy"
+                                   OnClick="@(() => DeleteGroupAsync(context.Key?.ToString(), context.Items))">
+                            Remove group
+                        </MudButton>
+                    </div>
+                </MudTh>
+            </GroupHeaderTemplate>
             <HeaderContent>
+                <MudTh Style="width:3rem"></MudTh>
                 <MudTh Style="width:7rem">IOA</MudTh>
                 <MudTh>Tag</MudTh>
                 <MudTh Style="width:11rem">Type</MudTh>
@@ -202,6 +245,10 @@
                 <MudTh Style="width:3rem"></MudTh>
             </HeaderContent>
             <RowTemplate>
+                <MudTd Style="width:3rem">
+                    <MudCheckBox T="bool" Value="_selected.Contains(context)" Size="Size.Small" Dense
+                                 ValueChanged="@(v => Select(context, v))" />
+                </MudTd>
                 <MudTd DataLabel="IOA">
                     <MudNumericField T="int" Value="context.Ioa" ValueChanged="@(v => context.Ioa = v)"
                                      Min="1" Variant="Variant.Text" Margin="Margin.Dense" HideSpinButtons Class="mono" />
@@ -257,7 +304,7 @@
                 </MudTd>
                 <MudTd>
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                   OnClick="@(() => _options.Points.Remove(context))" Disabled="_busy" />
+                                   OnClick="@(() => Remove(context))" Disabled="_busy" />
                 </MudTd>
             </RowTemplate>
         </MudTable>
@@ -271,6 +318,120 @@
     private System.Threading.Timer? _statusTimer;
     private bool _busy;
     private string _allowedClients = "";
+    private string _filter = "";
+    private readonly HashSet<Iec104PointDto> _selected = new();
+
+    /// <summary>Shown first, so a mapping broken by a deleted tag is the first thing on the page.</summary>
+    private const string OrphanGroup = "⚠ Tag no longer exists";
+
+    private readonly TableGroupDefinition<Iec104PointDto> _grouping = new()
+    {
+        Selector = null!,   // assigned in OnInitialized: it needs the tag list
+        Expandable = true,
+        IsInitiallyExpanded = true,
+    };
+
+    /// <summary>
+    /// Folder of the tag this point maps, as the group key. Points reference tags by storage key and
+    /// tags carry a folder, so the grouping is derived — there is no second thing to keep in step.
+    /// </summary>
+    private string GroupOf(Iec104PointDto point)
+    {
+        var tag = TagOf(point);
+        if (tag is null) return OrphanGroup;
+        var slash = tag.Path.LastIndexOf('/');
+        return slash <= 0 ? "(root)" : tag.Path[..slash];
+    }
+
+    private static bool IsOrphanGroup(string? key) => key == OrphanGroup;
+
+    /// <summary>
+    /// What the table shows: the filter applied, orphans hoisted to the top, then folder and IOA.
+    /// Sorted here rather than by the table because MudTable groups in the order it is given.
+    /// </summary>
+    private IEnumerable<Iec104PointDto> VisiblePoints
+    {
+        get
+        {
+            IEnumerable<Iec104PointDto> q = _options.Points;
+            if (!string.IsNullOrWhiteSpace(_filter))
+            {
+                var f = _filter.Trim();
+                q = q.Where(p => p.Ioa.ToString().Contains(f, StringComparison.OrdinalIgnoreCase)
+                                 || (TagOf(p)?.Path.Contains(f, StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+            return q
+                .OrderBy(p => IsOrphanGroup(GroupOf(p)) ? 0 : 1)
+                .ThenBy(GroupOf, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(p => p.Ioa);
+        }
+    }
+
+    private static string IoaRange(IEnumerable<Iec104PointDto> points)
+    {
+        var list = points.Select(p => p.Ioa).ToList();
+        if (list.Count == 0) return "—";
+        var min = list.Min();
+        var max = list.Max();
+        return min == max ? min.ToString() : $"{min}–{max}";
+    }
+
+    private void Select(Iec104PointDto point, bool selected)
+    {
+        if (selected) _selected.Add(point);
+        else _selected.Remove(point);
+    }
+
+    /// <summary>Tri-state: null renders as the indeterminate box, which is what a partial group is.</summary>
+    private bool? GroupChecked(IEnumerable<Iec104PointDto> points)
+    {
+        var list = points.ToList();
+        var chosen = list.Count(_selected.Contains);
+        if (chosen == 0) return false;
+        return chosen == list.Count ? true : null;
+    }
+
+    private void ToggleGroup(IEnumerable<Iec104PointDto> points, bool selected)
+    {
+        foreach (var point in points.ToList())
+            Select(point, selected);
+    }
+
+    private void Remove(Iec104PointDto point)
+    {
+        _options.Points.Remove(point);
+        _selected.Remove(point);
+    }
+
+    /// <summary>
+    /// Removing many points at once is exactly the operation that wants a confirmation: it is one
+    /// click, it is not undoable without reloading the page, and the count is the whole story.
+    /// </summary>
+    private async Task DeleteSelectedAsync()
+    {
+        var doomed = _selected.ToList();
+        var ok = await Dialogs.ShowMessageBoxAsync("Remove points",
+            $"Remove {doomed.Count} point(s) from the signal list? The control centre stops receiving them "
+            + "once you press \"Save & restart link\".",
+            yesText: "Remove", cancelText: "Cancel");
+        if (ok != true) return;
+
+        foreach (var point in doomed)
+            Remove(point);
+    }
+
+    private async Task DeleteGroupAsync(string? key, IEnumerable<Iec104PointDto> points)
+    {
+        var doomed = points.ToList();
+        var ok = await Dialogs.ShowMessageBoxAsync("Remove group",
+            $"Remove all {doomed.Count} point(s) under '{key}'? The control centre stops receiving them "
+            + "once you press \"Save & restart link\".",
+            yesText: "Remove", cancelText: "Cancel");
+        if (ok != true) return;
+
+        foreach (var point in doomed)
+            Remove(point);
+    }
 
     private static void CommandChanged(Iec104PointDto point, Iec104CommandType command)
     {
@@ -286,6 +447,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        _grouping.Selector = point => GroupOf(point);
         await LoadAsync();
         _statusTimer = new System.Threading.Timer(_ => InvokeAsync(RefreshStatusAsync), null, 0, 3000);
     }
@@ -297,6 +459,7 @@
             _tags = await Http.GetFromJsonAsync<List<TagDto>>("api/config/tags") ?? new();
             _options = await Http.GetFromJsonAsync<Iec104ServerOptions>("api/iec104") ?? new();
             _allowedClients = string.Join(", ", _options.AllowedClients);
+            _selected.Clear();
         }
         catch (Exception ex)
         {

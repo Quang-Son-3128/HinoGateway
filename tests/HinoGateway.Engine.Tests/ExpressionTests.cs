@@ -24,6 +24,54 @@ public class ExpressionTests
         return number;
     }
 
+    // --- limits ---------------------------------------------------------------
+    //
+    // These four are the only tests here that are about staying alive rather than being right. The
+    // compiler walks the tree by recursion in two places — parsing it and evaluating it — and .NET
+    // does not let anyone catch a StackOverflowException: the process ends, taking every poll loop
+    // and both northbound links with it. POST /api/expressions/validate compiles whatever text it is
+    // handed, at Viewer level, which is what turns "how deep can this go" into a remote question.
+
+    [Fact]
+    public void Deeply_nested_parentheses_are_refused_rather_than_overflowing_the_stack()
+    {
+        var expression = new string('(', 5000) + "1" + new string(')', 5000);
+        var error = Assert.Throws<ExpressionSyntaxException>(() => ExpressionCompiler.Compile(expression));
+        Assert.Contains("characters long", error.Message);
+    }
+
+    [Fact]
+    public void Nesting_is_refused_even_when_the_text_is_short_enough()
+    {
+        // Under the length limit, so this is the parser's own depth counter answering.
+        var expression = new string('(', 200) + "1" + new string(')', 200);
+        var error = Assert.Throws<ExpressionSyntaxException>(() => ExpressionCompiler.Compile(expression));
+        Assert.Contains("nests more than", error.Message);
+    }
+
+    [Fact]
+    public void A_long_flat_chain_is_refused_although_it_never_nests()
+    {
+        // The case the depth counter cannot see: `1+1+1+...` is consumed by a while loop, so parsing
+        // it stays shallow while the tree it builds leans left as far as there are terms. Nothing
+        // overflows here — it overflows later, inside Evaluate, once per poll. Only the node count
+        // catches this one, which is why both guards exist.
+        var expression = string.Join("+", Enumerable.Repeat("1", 1500));
+        var error = Assert.Throws<ExpressionSyntaxException>(() => ExpressionCompiler.Compile(expression));
+        Assert.Contains("more than", error.Message);
+    }
+
+    [Fact]
+    public void The_longest_formula_in_service_still_compiles()
+    {
+        // Verbatim from EVNRIKEN_Project.hino — 99 characters, the longest of the nine in it. The
+        // limits above are set roughly forty times higher than this on purpose.
+        const string real = "{INTMemory/Inv1EnergyYesterday} + {INTMemory/Inv2EnergyYesterday} + " +
+                            "{INTMemory/Inv3EnergyYesterday}";
+        Assert.True(ExpressionCompiler.TryCompile(real, out var compiled, out var error, out _), error);
+        Assert.Equal(3, compiled!.ReferencedTags.Count);
+    }
+
     // --- parsing --------------------------------------------------------------
 
     [Theory]

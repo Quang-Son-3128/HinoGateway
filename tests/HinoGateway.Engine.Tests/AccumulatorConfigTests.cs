@@ -101,7 +101,7 @@ public class AccumulatorConfigTests : IDisposable
     }
 
     [Fact]
-    public async Task A_version_7_project_still_loads_and_is_written_back_as_version_8()
+    public async Task A_version_7_project_still_loads_and_is_written_back_at_the_current_version()
     {
         await File.WriteAllTextAsync(_path, """
             {
@@ -118,7 +118,9 @@ public class AccumulatorConfigTests : IDisposable
 
         await store.UpsertTagAsync(Counter());
         Assert.Contains($"\"Version\": {HinoProject.CurrentVersion}", await File.ReadAllTextAsync(_path));
-        Assert.Equal(8, HinoProject.CurrentVersion);
+        // A canary on the constant: raising it is a decision, and the migration branch in
+        // JsonProjectStore.NormaliseCore has to be written in the same commit. 9 added commands.
+        Assert.Equal(9, HinoProject.CurrentVersion);
     }
 
     // --- validation ------------------------------------------------------------

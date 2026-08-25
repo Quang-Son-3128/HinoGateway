@@ -338,8 +338,13 @@ public sealed class GatewayApiKeyHandler : AuthenticationHandler<AuthenticationS
         Logger.LogWarning(
             "Rejected an API key from {Source} on {Path} ({Failures} failure(s) tracked overall)",
             source, Request.Path, _failures.TotalFailures);
+        // Deliberately not passed Context.RequestAborted. Someone guessing keys does not wait for the
+        // answer — they fire and hang up — so honouring the cancellation would let them skip the one
+        // thing that makes guessing expensive, and would throw a TaskCanceledException out of the
+        // authentication handler every time they did. Holding the handler for at most two seconds
+        // costs a client that has already been told "no" nothing.
         if (delay > TimeSpan.Zero)
-            await Task.Delay(delay, Context.RequestAborted).ConfigureAwait(false);
+            await Task.Delay(delay).ConfigureAwait(false);
 
         return AuthenticateResult.Fail("Invalid API key.");
     }
@@ -392,15 +397,39 @@ public sealed class GatewayApiKeyHandler : AuthenticationHandler<AuthenticationS
     /// declared leaves its header in place — and a header that survived that middleware is proof the
     /// request was relayed by someone we were not told to trust, so it cannot be the console either.
     /// </para>
+    /// <para>
+    /// The third check is the <c>Host</c> header, and it closes DNS rebinding. A page on the public
+    /// internet can make its own name resolve to 127.0.0.1; requests it then sends to
+    /// <c>http://its-name:2000/api/…</c> are <em>same-origin</em> for that page, so no CORS preflight
+    /// stands in the way and no API key is needed — and every one of them arrives at Kestrel from
+    /// loopback. The peer address is telling the truth and is still the wrong thing to trust. What
+    /// separates the two is the name the caller used: a real console asks for <c>localhost</c>, and a
+    /// rebound page asks for its own domain. Anyone reaching the gateway under some other name is
+    /// still served — as a <c>Viewer</c>, or with a key — but not as the console.
+    /// </para>
     /// </summary>
     private bool IsLocalRequest()
     {
         if (Request.Headers.ContainsKey("X-Forwarded-For") || Request.Headers.ContainsKey("Forwarded"))
             return false;
 
+        if (!IsLoopbackHost(Request.Host.Host))
+            return false;
+
         var remote = Context.Connection.RemoteIpAddress;
         return remote is not null && System.Net.IPAddress.IsLoopback(remote);
     }
+
+    /// <summary>
+    /// The host names a caller on the machine itself would use. <see cref="HostString.Host"/> has
+    /// already dropped the port and the brackets around an IPv6 literal, so <c>[::1]:2000</c> arrives
+    /// here as <c>::1</c>. Any address that parses is checked as an address rather than as text, so
+    /// the whole <c>127.0.0.0/8</c> range counts, not just the one spelling of it.
+    /// </summary>
+    internal static bool IsLoopbackHost(string? host) =>
+        !string.IsNullOrEmpty(host)
+        && (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
+            || (System.Net.IPAddress.TryParse(host, out var address) && System.Net.IPAddress.IsLoopback(address)));
 
     private AuthenticateResult Success(string name, string role)
     {

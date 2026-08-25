@@ -887,6 +887,12 @@ public sealed class Iec104Server : IAsyncDisposable
             return true;
         }
 
+        // The monitoring direction multiplies by ReportScale (Iec104ValueMapping.ToInformationObject);
+        // the control direction has to undo it. Without this a point that reports 50 % as 5000 would
+        // write the control centre's 5000 straight into a 0-100 tag. Done here, before the value is
+        // remembered for a select, so select and execute compare the same units.
+        value = FromWireScale(point, value);
+
         // Select/execute: a select is only confirmed and remembered; the execute does the work.
         if (select)
         {
@@ -1233,6 +1239,18 @@ public sealed class Iec104Server : IAsyncDisposable
         Iec104CommandType.SetpointShort => typeId is TypeID.C_SE_NC_1 or TypeID.C_SE_TC_1,
         _ => false,
     };
+
+    /// <summary>
+    /// Undo <see cref="Iec104PointDto.ReportScale"/> on the control direction. Only setpoints carry a
+    /// magnitude; a single or double command is a state, so its bool is returned untouched.
+    /// </summary>
+    private static object? FromWireScale(Iec104PointDto point, object? value)
+    {
+        if (value is not double wire) return value;
+        var scale = point.ReportScale;
+        if (!double.IsFinite(scale) || scale == 0 || scale == 1) return value;
+        return wire / scale;
+    }
 
     /// <summary>Pull the address, the value and the select flag out of a command ASDU.</summary>
     private static bool TryReadCommand(ASDU asdu, out int ioa, out object? value, out bool select, out string? reason)

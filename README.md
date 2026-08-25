@@ -90,6 +90,16 @@ exiting for the service manager to restart it.
 
 ## Control safety and version 7 migration
 
+Saving a connection, a folder or a tag applies it: edits made within a moment of each other are
+coalesced into one engine reload, so there is no second "Apply to engine" step to forget. The IEC-104
+and MQTT pages still apply on their own button, because restarting those links drops the connection
+to the control centre.
+
+Deleting takes the dependants with it — a connection's tags, the alarm rules watching them, the
+IEC-104 points mapping them, an accumulator counting them — after a confirmation that states the
+counts. Formulas and commands that read a deleted tag are reported rather than deleted, and have to
+be corrected before the project applies again.
+
 Every writable tag has an `AllowWrite` switch and optional engineering-unit min/max. It is off by
 default. A Bool tag is written strictly: `true`, `false`, `1` or `0` and nothing else, so a stray `2`
 cannot close a coil. IEC-104 also has a station-wide `AllowCommands` switch, per-point command type,
@@ -121,6 +131,36 @@ commands for them. Before applying an upgraded project:
 The REST and IEC paths share the same bounded command dispatcher and durable audit result. If the
 PLC write succeeds but audit persistence fails, the command remains `Successful`; the API reports
 `auditPersisted: false`, and the component-health alarm identifies the audit fault.
+
+## Commands
+
+A command is a script that runs when a tag is written and writes on to the plant. It exists because
+an IEC-104 setpoint lands in a memory tag — the control centre speaks in percent of the plant while
+the PLC wants kilowatts in a particular register — and without something in between the number
+arrives, reads back correctly on interrogation, and changes nothing in the field.
+
+```
+if (Tag("PLCControl/EnableEVNMode") != true) return;
+Write("PLCControl/SettingPEVN", 165 * value / 100);
+```
+
+`value` is what was just written into the trigger tag. `var`, `if`/`else` and `return;` are
+available; **there are no loops**, which is what makes "how long can a command run" arithmetic rather
+than a halting problem. Tag paths must be string literals, so the gateway knows what a command reads
+and writes before it runs — which is what lets it refuse a command naming a missing tag or one whose
+`AllowWrite` switch is off.
+
+Rules worth knowing, all of them deliberate:
+
+- Every write goes through the same dispatcher as an operator's: write policy, per-device queue,
+  deadline and audit trail, with the command named as the actor.
+- A command runs on a **change it witnessed while running**. The value a trigger already held when
+  the gateway started is not an order, so a restart never sends a setpoint by itself.
+- A value that is not `Good` is not written, and a condition that cannot be decided stops the
+  command. The failure is reported on the Commands page.
+- Commands do not chain: a trigger tag written by another command is refused at load and logged.
+- The Commands page has a dry run — the same code path, listing what would be written, writing
+  nothing. Commission a curtailment command with it rather than with the control centre.
 
 ## Northbound links
 

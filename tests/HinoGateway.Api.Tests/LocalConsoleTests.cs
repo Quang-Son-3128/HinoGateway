@@ -97,6 +97,41 @@ public class LocalConsoleTests
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostJsonAsync(WriteRoute, AWrite)).StatusCode);
     }
 
+    [Theory]
+    [InlineData("evil.example")]
+    [InlineData("10.20.0.55")]
+    [InlineData("gateway.plant.local")]
+    public async Task A_loopback_request_asking_for_another_name_is_not_the_console(string host)
+    {
+        // DNS rebinding. A page on the internet points its own name at 127.0.0.1; requests it sends
+        // to http://its-name:2000/ are same-origin for that page — no preflight, no key — and they
+        // reach Kestrel from loopback like the console does. The peer address cannot tell the two
+        // apart. The name the caller asked for can.
+        using var gateway = new GatewayFactory();
+        using var client = gateway.CreateClient(null);
+        client.BaseAddress = new Uri($"http://{host}/");
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostJsonAsync(WriteRoute, AWrite)).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("localhost")]
+    [InlineData("LOCALHOST")]
+    [InlineData("127.0.0.1")]
+    [InlineData("127.0.0.1:2000")]
+    [InlineData("[::1]:2000")]
+    public async Task The_names_a_console_actually_uses_all_still_work(string host)
+    {
+        // The other half of the check above: an engineer at the IPC types any of these, and the one
+        // convenience the keyless mode exists for must survive.
+        using var gateway = new GatewayFactory();
+        using var client = gateway.CreateClient(null);
+        client.BaseAddress = new Uri($"http://{host}/");
+
+        Assert.True(WasAllowed(await client.PostJsonAsync(WriteRoute, AWrite)),
+            $"'{host}' is the machine itself and must still be the console");
+    }
+
     [Fact]
     public async Task A_keyless_gateway_still_refuses_configuration_changes_from_the_network()
     {

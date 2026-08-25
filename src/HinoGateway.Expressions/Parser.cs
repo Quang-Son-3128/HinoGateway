@@ -29,12 +29,56 @@ namespace HinoGateway.Expressions;
 /// </summary>
 internal sealed class Parser
 {
+    /// <summary>
+    /// How deeply the grammar may nest. Every level of <c>(</c> costs eleven stack frames on the way
+    /// down the precedence ladder, so without this a few thousand of them overflow the stack — and a
+    /// <c>StackOverflowException</c> is not catchable in .NET, it ends the process. The formula
+    /// editor's check endpoint compiles whatever text it is sent, which makes that a remote answer
+    /// to a local question.
+    /// </summary>
+    private const int MaxDepth = 64;
+
+    /// <summary>
+    /// How many nodes a formula may be built from.
+    ///
+    /// <para>
+    /// This is <em>not</em> the same guard as <see cref="MaxDepth"/>, and one without the other
+    /// leaves the hole open. <c>ParseAdditive</c> and its neighbours consume a run of operators in a
+    /// <c>while</c> loop, so <c>1+1+1+…</c> parses at constant recursion depth while building a tree
+    /// that leans left as far as there are terms. Nothing overflows while parsing it; the overflow
+    /// arrives later, in <c>Evaluate</c>, once per poll — and if that formula was saved to
+    /// <c>hino.json</c> the gateway then dies on startup too, and only hand-editing the file
+    /// recovers it. Tree height can never exceed the node count, so bounding this bounds evaluation.
+    /// </para>
+    /// </summary>
+    private const int MaxNodes = 1024;
+
     private readonly List<Token> _tokens;
     private readonly HashSet<string> _referencedTags = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _writtenTags = new(StringComparer.Ordinal);
+    private readonly bool _script;
     private int _index;
     private int _previousSlots;
+    private int _depth;
+    private int _nodes;
 
-    public Parser(List<Token> tokens) => _tokens = tokens;
+    /// <param name="script">
+    /// Parse for a command script rather than a formula: bare words are local variables, and
+    /// <c>Tag("path")</c> takes the place of <c>{path}</c>. See <see cref="ScriptParser"/>, which
+    /// drives this one for the statements around the expressions.
+    /// </param>
+    public Parser(List<Token> tokens, bool script = false)
+    {
+        _tokens = tokens;
+        _script = script;
+    }
+
+    /// <summary>Tags a command script writes to, by path. Empty for a formula, which cannot write.</summary>
+    public IReadOnlySet<string> WrittenTags => _writtenTags;
+
+    internal bool IsScript => _script;
+
+    internal void RecordWrite(string tagPath) => _writtenTags.Add(tagPath);
 
     /// <summary>Every tag id named by a <c>{...}</c> reference, each one once.</summary>
     public IReadOnlySet<string> ReferencedTags => _referencedTags;
@@ -53,16 +97,45 @@ internal sealed class Parser
         return node;
     }
 
-    private Token Current => _tokens[_index];
+    internal Token Current => _tokens[_index];
 
-    private Token Advance() => _tokens[_index++];
+    internal Token Advance() => _tokens[_index++];
 
     private bool IsOperator(params string[] operators) =>
         Current.Type == TokenType.Operator && operators.Contains(Current.Text);
 
+    /// <summary>Count one node towards <see cref="MaxNodes"/> and hand it back.</summary>
+    internal T Track<T>(T node) where T : ExpressionNode
+    {
+        if (++_nodes > MaxNodes)
+            throw new ExpressionSyntaxException(
+                $"the expression is built from more than {MaxNodes} parts, which is far more than a formula needs",
+                Current.Position);
+        return node;
+    }
+
+    /// <summary>
+    /// Enter one level of nesting. Paired with <see cref="Ascend"/> in a <c>finally</c>, so a
+    /// formula that throws part-way through still leaves the counter where the next parse expects it
+    /// — parsers are per-compilation here, but the pairing is what makes that irrelevant.
+    /// </summary>
+    internal void Descend()
+    {
+        if (++_depth > MaxDepth)
+            throw new ExpressionSyntaxException(
+                $"the expression nests more than {MaxDepth} levels deep", Current.Position);
+    }
+
+    internal void Ascend() => _depth--;
+
     // --- precedence ladder ----------------------------------------------------------------
 
-    private ExpressionNode ParseExpression() => ParseConditional();
+    internal ExpressionNode ParseExpression()
+    {
+        Descend();
+        try { return ParseConditional(); }
+        finally { Ascend(); }
+    }
 
     private ExpressionNode ParseConditional()
     {
@@ -78,7 +151,7 @@ internal sealed class Parser
         // Right-associative: `a ? b : c ? d : e` reads as `a ? b : (c ? d : e)`, which is how a chain
         // of "otherwise if" is meant.
         var whenFalse = ParseConditional();
-        return new ConditionalNode(condition, whenTrue, whenFalse);
+        return Track(new ConditionalNode(condition, whenTrue, whenFalse));
     }
 
     private ExpressionNode ParseOr()
@@ -87,7 +160,7 @@ internal sealed class Parser
         while (IsOperator("||"))
         {
             Advance();
-            node = new BinaryNode("||", node, ParseAnd());
+            node = Track(new BinaryNode("||", node, ParseAnd()));
         }
         return node;
     }
@@ -98,7 +171,7 @@ internal sealed class Parser
         while (IsOperator("&&"))
         {
             Advance();
-            node = new BinaryNode("&&", node, ParseEquality());
+            node = Track(new BinaryNode("&&", node, ParseEquality()));
         }
         return node;
     }
@@ -109,7 +182,7 @@ internal sealed class Parser
         while (IsOperator("==", "!="))
         {
             var op = Advance().Text;
-            node = new BinaryNode(op, node, ParseComparison());
+            node = Track(new BinaryNode(op, node, ParseComparison()));
         }
         return node;
     }
@@ -120,7 +193,7 @@ internal sealed class Parser
         while (IsOperator("<", "<=", ">", ">="))
         {
             var op = Advance().Text;
-            node = new BinaryNode(op, node, ParseAdditive());
+            node = Track(new BinaryNode(op, node, ParseAdditive()));
         }
         return node;
     }
@@ -131,7 +204,7 @@ internal sealed class Parser
         while (IsOperator("+", "-"))
         {
             var op = Advance().Text;
-            node = new BinaryNode(op, node, ParseMultiplicative());
+            node = Track(new BinaryNode(op, node, ParseMultiplicative()));
         }
         return node;
     }
@@ -142,17 +215,21 @@ internal sealed class Parser
         while (IsOperator("*", "/", "%"))
         {
             var op = Advance().Text;
-            node = new BinaryNode(op, node, ParseUnary());
+            node = Track(new BinaryNode(op, node, ParseUnary()));
         }
         return node;
     }
 
     private ExpressionNode ParseUnary()
     {
+        // A run of unary operators (`!!!!x`) recurses here without going through ParseExpression,
+        // so this level has to be counted on its own or the depth guard has a door left open.
         if (IsOperator("-", "+", "!"))
         {
             var op = Advance().Text;
-            return new UnaryNode(op, ParseUnary());
+            Descend();
+            try { return Track(new UnaryNode(op, ParseUnary())); }
+            finally { Ascend(); }
         }
         return ParsePower();
     }
@@ -166,7 +243,7 @@ internal sealed class Parser
         Advance();
         // The right side goes back through unary so that `2^-1` parses, and through this method
         // again so that `2^3^2` groups to the right.
-        return new BinaryNode("^", node, ParseUnary());
+        return Track(new BinaryNode("^", node, ParseUnary()));
     }
 
     // --- leaves ---------------------------------------------------------------------------
@@ -178,24 +255,24 @@ internal sealed class Parser
         {
             case TokenType.Number:
                 Advance();
-                return new LiteralNode(token.Literal, token.Text);
+                return Track(new LiteralNode(token.Literal, token.Text));
 
             case TokenType.String:
                 Advance();
-                return new LiteralNode(token.Literal, $"\"{token.Text}\"");
+                return Track(new LiteralNode(token.Literal, $"\"{token.Text}\""));
 
             case TokenType.Boolean:
                 Advance();
-                return new LiteralNode(token.Literal, token.Text.ToLowerInvariant());
+                return Track(new LiteralNode(token.Literal, token.Text.ToLowerInvariant()));
 
             case TokenType.Null:
                 Advance();
-                return new LiteralNode(null, "null");
+                return Track(new LiteralNode(null, "null"));
 
             case TokenType.TagReference:
                 Advance();
                 _referencedTags.Add(token.Text);
-                return new TagNode(token.Text);
+                return Track(new TagNode(token.Text));
 
             case TokenType.LeftParen:
                 Advance();
@@ -219,6 +296,10 @@ internal sealed class Parser
         var name = Advance();
         if (Current.Type != TokenType.LeftParen)
         {
+            // In a script a bare word is a local variable — that is what `var load = …` created.
+            if (_script)
+                return Track(new VariableNode(name.Text, name.Position));
+
             // A bare word is the commonest first mistake: either a tag written without braces or a
             // function written without its brackets. Say both, rather than "unexpected identifier".
             throw new ExpressionSyntaxException(
@@ -235,8 +316,24 @@ internal sealed class Parser
             if (arguments.Length != 1)
                 throw new ExpressionSyntaxException(
                     $"prev() takes exactly 1 argument, got {arguments.Length}", name.Position);
-            return new PreviousNode(arguments[0], _previousSlots++);
+            return Track(new PreviousNode(arguments[0], _previousSlots++));
         }
+
+        // Tag("path") is the script's way of naming a tag, and it compiles to exactly the node a
+        // formula's {path} produces — same reading, same quality propagation, same dependency set.
+        // The path must be a literal so that the set of tags a command touches is known before it
+        // runs: that is what lets the validator refuse a command naming a tag that does not exist,
+        // and what lets the UI list what a command reads and writes.
+        if (_script && string.Equals(name.Text, "Tag", StringComparison.OrdinalIgnoreCase))
+        {
+            var path = ParseLiteralPathCall(name);
+            _referencedTags.Add(path);
+            return Track(new TagNode(path));
+        }
+
+        if (_script && string.Equals(name.Text, "Write", StringComparison.OrdinalIgnoreCase))
+            throw new ExpressionSyntaxException(
+                "Write(…) is a statement, not a value — put it on a line of its own", name.Position);
 
         if (!Functions.TryGet(name.Text, out var function))
             throw new ExpressionSyntaxException($"there is no function called '{name.Text}'", name.Position);
@@ -250,7 +347,7 @@ internal sealed class Parser
         if (function.CheckArguments?.Invoke(args) is { } complaint)
             throw new ExpressionSyntaxException(complaint, name.Position);
 
-        return new FunctionNode(function, args);
+        return Track(new FunctionNode(function, args));
     }
 
     private ExpressionNode[] ParseArguments(Token name)
@@ -279,6 +376,39 @@ internal sealed class Parser
             throw new ExpressionSyntaxException(
                 $"',' or ')' expected in {name.Text}(…), found {Current}", Current.Position);
         }
+    }
+
+    /// <summary>The single string literal of a <c>Tag("…")</c> call, with a message that says why.</summary>
+    private string ParseLiteralPathCall(Token name)
+    {
+        Expect(TokenType.LeftParen, "'(' is missing");
+        if (Current.Type != TokenType.String)
+            throw new ExpressionSyntaxException(
+                $"{name.Text}(…) needs the tag path written out as text, for example {name.Text}(\"Plant/Power\")",
+                Current.Position);
+        var path = Advance().Text.Trim();
+        if (path.Length == 0)
+            throw new ExpressionSyntaxException("the tag path is empty", Current.Position);
+        Expect(TokenType.RightParen, "')' is missing");
+        return path;
+    }
+
+    /// <summary>Path and value of a <c>Write("…", expr)</c>, parsed for the statement layer.</summary>
+    internal (string Path, ExpressionNode Value) ParseWriteArguments(Token name)
+    {
+        Expect(TokenType.LeftParen, "'(' is missing");
+        if (Current.Type != TokenType.String)
+            throw new ExpressionSyntaxException(
+                "Write(…) needs the tag path written out as text, for example Write(\"Plant/Setpoint\", 50)",
+                Current.Position);
+        var path = Advance().Text.Trim();
+        if (path.Length == 0)
+            throw new ExpressionSyntaxException("the tag path is empty", Current.Position);
+        Expect(TokenType.Comma, "',' is missing — Write takes a tag path and a value");
+        var value = ParseExpression();
+        Expect(TokenType.RightParen, "')' is missing");
+        _writtenTags.Add(path);
+        return (path, value);
     }
 
     private void Expect(TokenType type, string message)

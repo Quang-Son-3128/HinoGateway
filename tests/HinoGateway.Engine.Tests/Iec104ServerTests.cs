@@ -305,6 +305,69 @@ public class Iec104ServerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_setpoint_command_undoes_the_report_scale()
+    {
+        // The point reports a 0-100 % tag as the 0-10000 integer the utility asked for, so a setpoint
+        // of 5000 coming back down means 50 %, not 5000. Getting this wrong writes a hundred times
+        // the intended curtailment limit into the PLC.
+        Publish("Plant/Limit", 100.0);
+        var point = Point(310, "Plant/Limit", Iec104PointType.Scaled, Iec104CommandType.SetpointScaled);
+        point.ReportScale = 100;
+        await StartAsync(point);
+        await ActivateAsync();
+
+        _client!.SendControlCommand(CauseOfTransmission.ACTIVATION, CommonAddress,
+            new SetpointCommandScaled(310, new ScaledValue(5000), new SetpointCommandQualifier(false, 0)));
+
+        await WaitFor(() => { lock (_writes) return _writes.Count > 0; }, "the command to reach the tag");
+        var (tag, value) = _writes.Single();
+        Assert.Equal("Plant/Limit", tag);
+        Assert.Equal(50.0, Assert.IsType<double>(value), 6);
+    }
+
+    [Fact]
+    public async Task The_report_scale_is_a_round_trip()
+    {
+        // Monitoring direction and control direction have to agree: whatever the station reports for
+        // 50 % is exactly what the control centre may send back to mean 50 %.
+        Publish("Plant/Limit", 10.0);
+        var point = Point(311, "Plant/Limit", Iec104PointType.ShortFloat, Iec104CommandType.SetpointShort);
+        point.ReportScale = 100;
+        var received = await StartAsync(point);
+        await ActivateAsync();
+
+        Publish("Plant/Limit", 50.0);
+        await WaitFor(() => Snapshot(received).Any(a => a.Cot == CauseOfTransmission.SPONTANEOUS),
+            "the scaled measurand to be reported");
+        var reported = Assert.IsType<MeasuredValueShortWithCP56Time2a>(
+            Snapshot(received).First(a => a.Cot == CauseOfTransmission.SPONTANEOUS).GetElement(0)).Value;
+        Assert.Equal(5000f, reported, 3);
+
+        _client!.SendControlCommand(CauseOfTransmission.ACTIVATION, CommonAddress,
+            new SetpointCommandShort(311, reported, new SetpointCommandQualifier(false, 0)));
+
+        await WaitFor(() => { lock (_writes) return _writes.Count > 0; }, "the command to reach the tag");
+        Assert.Equal(50.0, Assert.IsType<double>(_writes.Single().Value), 3);
+    }
+
+    [Fact]
+    public async Task A_single_command_ignores_the_report_scale()
+    {
+        // A state is not a magnitude. Scaling a breaker command would be nonsense.
+        Publish("Plant/Breaker", false);
+        var point = Point(201, "Plant/Breaker", Iec104PointType.SinglePoint, Iec104CommandType.SingleCommand);
+        point.ReportScale = 100;
+        await StartAsync(point);
+        await ActivateAsync();
+
+        _client!.SendControlCommand(CauseOfTransmission.ACTIVATION, CommonAddress,
+            new SingleCommand(201, true, false, 0));
+
+        await WaitFor(() => { lock (_writes) return _writes.Count > 0; }, "the command to reach the tag");
+        Assert.Equal(("Plant/Breaker", (object)true), _writes.Single());
+    }
+
+    [Fact]
     public async Task A_command_that_exceeds_its_deadline_is_terminated_negatively()
     {
         var options = new Iec104ServerOptions

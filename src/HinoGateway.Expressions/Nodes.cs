@@ -39,6 +39,33 @@ internal sealed class TagNode : ExpressionNode
     public override string ToSource() => $"{{{TagId}}}";
 }
 
+/// <summary>
+/// A local of a command script (<c>var load = …</c>, or the built-in <c>value</c>). Only reachable in
+/// script mode: in a formula a bare word is refused by the parser, with a message offering both of
+/// the things it was probably meant to be.
+/// </summary>
+internal sealed class VariableNode : ExpressionNode
+{
+    private readonly int _position;
+
+    public VariableNode(string name, int position)
+    {
+        Name = name;
+        _position = position;
+    }
+
+    public string Name { get; }
+
+    public override ExpressionValue Evaluate(EvaluationContext context) =>
+        context.Variables is { } variables && variables.TryGet(Name, out var value)
+            ? value
+            // The compiler refuses an undeclared name, so this is the belt to that braces: it can
+            // only be reached by evaluating a script tree outside a script context.
+            : ExpressionValue.Bad($"'{Name}' has no value here");
+
+    public override string ToSource() => Name;
+}
+
 internal sealed class UnaryNode : ExpressionNode
 {
     private readonly string _op;

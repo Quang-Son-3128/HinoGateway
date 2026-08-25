@@ -49,9 +49,34 @@ builder.Services.AddHealthChecks()
 
 var commandRatePerSecond = Math.Clamp(
     builder.Configuration.GetValue<int?>("Commands:RateLimitPerSecond") ?? 20, 1, 10_000);
+
+// The ceiling for everything, well above what any real client asks for. It exists because several
+// endpoints do real work before anyone has been authenticated or authorised: the audit trail flushes
+// to disk on the way out of a mutation, the expression endpoints compile whatever text they are
+// handed, and history reads walk files. None of those were reachable at an unbounded rate on
+// purpose. The tight "commands" bucket below still governs PLC writes; this one only stops a flood.
+var requestRatePerSecond = Math.Clamp(
+    builder.Configuration.GetValue<int?>("RateLimit:RequestsPerSecond") ?? 200, 10, 100_000);
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+        // Health checks are how a service manager and a load balancer decide this gateway is alive.
+        // Throttling them turns a busy minute into a restart.
+        context.Request.Path.StartsWithSegments("/health")
+            ? RateLimitPartition.GetNoLimiter("health")
+            : RateLimitPartition.GetTokenBucketLimiter(
+                partitionKey: context.User.Identity?.Name
+                              ?? context.Connection.RemoteIpAddress?.ToString()
+                              ?? "unknown",
+                factory: _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = requestRatePerSecond,
+                    TokensPerPeriod = requestRatePerSecond,
+                    ReplenishmentPeriod = TimeSpan.FromSeconds(1),
+                    AutoReplenishment = true,
+                    QueueLimit = 0,
+                }));
     options.AddPolicy("commands", context => RateLimitPartition.GetTokenBucketLimiter(
         partitionKey: context.User.Identity?.Name
                       ?? context.Connection.RemoteIpAddress?.ToString()
@@ -199,6 +224,9 @@ foreach (var factory in plugins.Factories)
 builder.Services.AddHostedService<EngineHostedService>();
 builder.Services.AddHostedService<TelemetryBroadcaster>();
 builder.Services.AddHostedService<AlarmService>();
+// Singleton as well as hosted: the controllers reload it after an edit and read its last-run report.
+builder.Services.AddSingleton<CommandEngine>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CommandEngine>());
 
 // --- Northbound: IEC-104 controlled station (the link to the utility) --------
 // Registered as a singleton as well as a hosted service so the config API can restart it.
@@ -237,10 +265,9 @@ foreach (var literal in security.ApiKeys.Where(k => !string.IsNullOrWhiteSpace(k
 // scheme, and all four are wrong for a proxied request until this has run.
 app.UseForwardedHeaders();
 
-// Serve the Blazor WebAssembly client that this project references.
-app.UseBlazorFrameworkFiles();
-app.UseStaticFiles();
-
+// Above the static files, not below them. The client application is the thing an operator's browser
+// downloads and then runs against this gateway; serving it in clear text on a gateway that has been
+// told to require TLS hands an attacker on the path the whole surface to rewrite.
 if (security.Enabled && security.RequireHttps)
 {
     app.UseHsts();
@@ -255,6 +282,39 @@ if (security.Enabled && security.RequireHttps)
         await next(context);
     });
 }
+
+// Four headers, on every response including the static files below.
+//
+// frame-ancestors is the one that is doing real work here rather than ticking a box: a request from
+// the machine itself is granted Admin when no keys are configured, so a page anywhere that puts this
+// UI in an invisible iframe and persuades the operator to click through it is a page that can move a
+// setpoint. 'none' is right because nothing legitimately frames a gateway console.
+//
+// The two relaxations in the policy are Blazor WebAssembly's, not ours: 'wasm-unsafe-eval' is how
+// the .NET runtime is instantiated at all, and MudBlazor writes component styles inline. Both are
+// scoped to their own directive rather than loosening default-src.
+app.Use(async (context, next) =>
+{
+    var headers = context.Response.Headers;
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["Referrer-Policy"] = "no-referrer";
+    headers["Content-Security-Policy"] =
+        "default-src 'self'; " +
+        "script-src 'self' 'wasm-unsafe-eval'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data:; " +
+        "font-src 'self' data:; " +
+        "connect-src 'self' ws: wss:; " +
+        "object-src 'none'; " +
+        "base-uri 'self'; " +
+        "form-action 'self'; " +
+        "frame-ancestors 'none'";
+    await next(context);
+});
+
+// Serve the Blazor WebAssembly client that this project references.
+app.UseBlazorFrameworkFiles();
+app.UseStaticFiles();
 
 app.UseAuthentication();
 app.UseAuthorization();

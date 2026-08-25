@@ -147,6 +147,12 @@ public sealed class ControlCommandService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _health.Running("control-commands");
+
+        // The audit trail has no loop of its own: it reports on the commands that pass through it,
+        // and a plant that has been given no commands has nothing to report. Declaring it here puts
+        // it on the health screen from the start, healthy, instead of appearing at the first command
+        // and then going stale 30 s later with "audit-trail: No heartbeat" over a working gateway.
+        _health.EventDriven("audit-trail");
         try
         {
             while (!stoppingToken.IsCancellationRequested)

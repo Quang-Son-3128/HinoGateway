@@ -92,7 +92,18 @@ dotnet run -c Release --project tests/HinoGateway.LoadTests -- soak     # ~30 ph
 `soak` là thứ phát hiện rò rỉ bộ nhớ và trôi nhịp poll — thứ mà test đơn vị không thấy. Báo cáo in ra
 tỉ lệ poll, drop hàng đợi, CPU/RSS, heap và phân mảnh.
 
-Điều kiện để đi tiếp: **build xanh, toàn bộ test PASS, `soak` không tăng heap đều đặn.**
+Trước mỗi bản phát hành, soát luôn cảnh báo bảo mật của thư viện phụ thuộc:
+
+```powershell
+dotnet list HinoGateway.sln package --vulnerable --include-transitive
+```
+
+Lệnh này in ra các gói có advisory đã công bố. Lưu ý các gói `Microsoft.AspNetCore.Components.WebAssembly*`
+đang **ghim cứng** một số bản vá (`8.0.15`) trong khi phần còn lại thả `8.0.*` — nên chúng không tự
+lên theo bản vá của .NET, phải nâng bằng tay.
+
+Điều kiện để đi tiếp: **build xanh, toàn bộ test PASS, `soak` không tăng heap đều đặn, không còn gói
+nào bị liệt kê ở mức High/Critical.**
 
 ---
 
@@ -317,6 +328,14 @@ Với một service, đặt biến ở mức máy để service đọc được:
 - `Security:Enabled = false`
 - Giữ `Kestrel` nghe `http://localhost:2000` (mặc định)
 - Người ngồi tại IPC có quyền Admin; không ai từ mạng vào được
+
+> **Mở trình duyệt bằng đúng tên máy.** Quyền Admin của console chỉ được cấp khi request vừa đến từ
+> loopback **vừa** hỏi đúng tên `localhost` / `127.0.0.1` / `[::1]`. Lý do là DNS rebinding: một trang
+> web bất kỳ có thể trỏ tên miền của nó về `127.0.0.1`, và request nó gửi tới
+> `http://tên-của-nó:2000/api/...` sẽ là *same-origin* với trang đó — không CORS, không cần khoá — mà
+> vẫn đến Kestrel từ loopback y hệt console thật. Địa chỉ nguồn không phân biệt được hai thứ; cái tên
+> thì có. Hệ quả thực tế: nếu bạn mở giao diện bằng `http://TÊN-MÁY:2000` **ngay trên IPC**, bạn chỉ
+> được `Viewer`. Dùng `http://localhost:2000`.
 
 **B. Truy cập qua mạng** — bắt buộc bật security:
 
@@ -610,6 +629,7 @@ Chạy toàn bộ, ghi kết quả vào biên bản. Thay `<ip>` bằng địa c
 | 15 | Tự phục hồi | `Stop-Process -Name HinoGateway.Server -Force` | Service tự chạy lại trong ~5 s (nhờ mục 8.3) |
 | 16 | Bảo mật (nếu bật) | Gọi API **không** kèm `X-Api-Key` | Bị từ chối / chỉ đọc, đúng như thiết kế |
 | 17 | Ổn định | Để chạy ≥ 30 phút, xem lại bước 3, 4, 9 | Không suy giảm, RAM không tăng đều |
+| 17b | **Quyền thư mục cài đặt** | `icacls "C:\Program Files\HinoGateway"` | Chỉ `SYSTEM`, `Administrators` (và tài khoản service, quyền đọc) có quyền ghi — **không** có `Users`, `Authenticated Users` hay `Everyone` với `(M)`/`(W)`/`(F)` |
 | 18 | **Mất điện đột ngột** | Rút điện IPC khi gateway đang ghi (đang có lệnh/đang lưu cấu hình), cấp điện lại | Gateway tự lên, `hino.json` đọc được, làm lại bước 1–7 đạt |
 | 19 | **Mất mạng rồi có lại** | Rút dây mạng ≥ 5 phút rồi cắm lại | Thiết bị `Connected` lại, MQTT gửi hết spool tồn, IEC-104 nhận lại kết nối — **không cần khởi động lại service** |
 | 20 | Khôi phục từ bản lưu | Dừng service, làm hỏng `hino.json` (`"x" > hino.json`), chạy lại service | Service **vẫn lên**; log ghi `recovered from ...bak`; có file `hino.json.corrupt-*`; cấu hình còn nguyên |
@@ -621,6 +641,14 @@ dữ liệu nằm trên ổ mạng chưa mount kịp, UWF nuốt mất cấu hì
 gateway sống lại sau một lần tắt máy *sạch*; mất điện thật thì khác — nó cắt ngang giữa một lần ghi
 đĩa. Bước 19 chứng minh gateway không cần ai vào bấm nút sau một sự cố mạng, và bước 20 chứng minh
 lưới an toàn cuối cùng thật sự hoạt động **trên chính máy này**, không phải chỉ trong test.
+
+**Bước 17b không phải thủ tục.** Lúc khởi động, gateway nạp mọi `.dll` nằm trong thư mục `drivers\`
+bên cạnh file thực thi — đó là cách thêm một giao thức mà không phải build lại toàn bộ, và nó cố ý
+không có chữ ký số: một driver trong thư mục đó được tin ngang với chính gateway. Hệ quả là **ai ghi
+được vào thư mục cài đặt thì chạy được mã dưới quyền của service** (thường là `LocalSystem`). Thư mục
+dữ liệu (`C:\ProgramData\HinoGateway`) được gateway tự siết ACL lúc khởi động; thư mục **cài đặt thì
+không** — nó do người cài đặt tạo ra. Cài vào `C:\Program Files` là an toàn theo mặc định; cài vào một
+đường dẫn tự tạo dưới `C:\` thì phải kiểm bằng `icacls`.
 
 Sau bước 19, đối chiếu số liệu ở `/mqtt`: `spool pending` phải trở về 0 và `spool-drops` phải bằng 0
 — tức là dữ liệu trong lúc mất mạng được giữ lại rồi gửi bù, không phải bị vứt.

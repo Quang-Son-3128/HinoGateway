@@ -18,6 +18,13 @@ internal enum TokenType
     Comma,
     Question,
     Colon,
+
+    // Script mode only. In a formula '{' opens a tag reference and '=' is a mistake; in a command
+    // script they are a block and an assignment, which is why the mode has to be chosen up front.
+    LeftBrace,
+    RightBrace,
+    Semicolon,
+    Assign,
 }
 
 internal readonly record struct Token(TokenType Type, string Text, int Position, object? Literal = null)
@@ -60,9 +67,26 @@ public sealed class ExpressionSyntaxException : Exception
 internal sealed class Lexer
 {
     private readonly string _text;
+    private readonly bool _script;
     private int _index;
 
-    public Lexer(string text) => _text = text ?? "";
+    /// <param name="script">
+    /// Script mode: braces delimit blocks, ';' ends a statement and '=' assigns. A command script
+    /// names tags with <c>Tag("path")</c> instead of <c>{path}</c> — the two notations cannot
+    /// coexist, since one needs '{' for a tag and the other for a block.
+    /// </param>
+    public Lexer(string text, bool script = false)
+    {
+        _text = text ?? "";
+        _script = script;
+    }
+
+    /// <summary>
+    /// Enough tokens for any formula a person writes, and few enough that the parser cannot be
+    /// handed a stack-deep tree. The exact bounds live in <see cref="Parser"/>; this one is here
+    /// because it costs nothing and stops the pathological input before a tree exists at all.
+    /// </summary>
+    private const int MaxTokens = 2048;
 
     public List<Token> Tokenize()
     {
@@ -73,6 +97,10 @@ internal sealed class Lexer
             tokens.Add(token);
             if (token.Type == TokenType.End)
                 return tokens;
+            if (tokens.Count > MaxTokens)
+                throw new ExpressionSyntaxException(
+                    $"the expression has more than {MaxTokens} tokens, which is far more than a formula needs",
+                    token.Position);
         }
     }
 
@@ -89,7 +117,7 @@ internal sealed class Lexer
             return ReadNumber();
         if (c == '"' || c == '\'')
             return ReadString(c);
-        if (c == '{')
+        if (c == '{' && !_script)
             return ReadTagReference();
         if (char.IsLetter(c) || c == '_')
             return ReadIdentifier();
@@ -101,6 +129,16 @@ internal sealed class Lexer
             case ',': _index++; return new Token(TokenType.Comma, ",", start);
             case '?': _index++; return new Token(TokenType.Question, "?", start);
             case ':': _index++; return new Token(TokenType.Colon, ":", start);
+        }
+
+        if (_script)
+        {
+            switch (c)
+            {
+                case '{': _index++; return new Token(TokenType.LeftBrace, "{", start);
+                case '}': _index++; return new Token(TokenType.RightBrace, "}", start);
+                case ';': _index++; return new Token(TokenType.Semicolon, ";", start);
+            }
         }
 
         // Two-character operators first, so '<=' is never read as '<' followed by '='.
@@ -120,7 +158,13 @@ internal sealed class Lexer
             // A lone '=' is almost always a typo for '==' rather than an assignment attempt, and
             // saying so is more useful than "unexpected character".
             if (c == '=')
+            {
+                // Two-character operators are read above, so a '=' reaching here is single. In a
+                // script that is an assignment; in a formula it is almost always a typo for '=='.
+                if (_script)
+                    return new Token(TokenType.Assign, "=", start);
                 throw new ExpressionSyntaxException("'=' is not an operator here — use '==' to compare", start);
+            }
             if (c is '&' or '|')
                 throw new ExpressionSyntaxException($"use '{c}{c}' for logical {(c == '&' ? "and" : "or")}", start);
             return new Token(TokenType.Operator, c.ToString(), start);

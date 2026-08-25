@@ -19,8 +19,6 @@ namespace HinoGateway.Server.Controllers;
 public sealed class Iec104Controller : ControllerBase
 {
     /// <summary>IEC 60870-5-101/104 information object addresses are three octets.</summary>
-    private const int MaxIoa = 16_777_215;
-
     private readonly IConfigStore _store;
     private readonly Iec104HostedService _link;
 
@@ -222,81 +220,11 @@ public sealed class Iec104Controller : ControllerBase
 
     // --- validation ----------------------------------------------------------
 
-    private async Task<List<string>> ValidateAsync(Iec104ServerOptions options, CancellationToken ct)
-    {
-        var problems = new List<string>();
-
-        if (options.Port is < 1 or > 65535)
-            problems.Add($"Port must be between 1 and 65535 (got {options.Port}).");
-        if (string.IsNullOrWhiteSpace(options.BindAddress))
-            problems.Add("A bind address is required (use 0.0.0.0 for every interface).");
-        if (options.CommonAddress is < 1 or > 65534)
-            problems.Add($"Common address must be between 1 and 65534 (got {options.CommonAddress}).");
-        if (options.MaxConnections is < 1 or > 32)
-            problems.Add($"Max connections must be between 1 and 32 (got {options.MaxConnections}).");
-        if (options.CommandQueueCapacity is < 1 or > 10_000)
-            problems.Add("Command queue capacity must be between 1 and 10000.");
-        if (options.CommandTimeoutMs is < 100 or > 600_000)
-            problems.Add("Command timeout must be between 100 and 600000 ms.");
-        if (options.K is < 1 or > 32767)
-            problems.Add("k must be between 1 and 32767.");
-        if (options.W is < 1 or > 32767)
-            problems.Add("w must be between 1 and 32767.");
-        if (options.W > options.K)
-            problems.Add($"w ({options.W}) must not exceed k ({options.K}).");
-        if (options.T2 >= options.T1)
-            problems.Add($"t2 ({options.T2}s) must be shorter than t1 ({options.T1}s).");
-        foreach (var (name, value) in new[] { ("t0", options.T0), ("t1", options.T1), ("t2", options.T2), ("t3", options.T3) })
-            if (value is < 1 or > 255)
-                problems.Add($"{name} must be between 1 and 255 seconds (got {value}).");
-        if (options.PeriodicIntervalSeconds is < 0 or > 86400)
-            problems.Add("The periodic interval must be between 0 (off) and 86400 seconds.");
-
-        var tags = await _store.GetTagsAsync(ct);
-        var tagsById = tags.ToDictionary(t => t.Id);
-
-        foreach (var duplicate in options.Points.GroupBy(p => p.Ioa).Where(g => g.Count() > 1))
-            problems.Add($"IOA {duplicate.Key} is mapped {duplicate.Count()} times — each address must be unique.");
-
-        foreach (var point in options.Points)
-        {
-            if (point.Ioa is < 1 or > MaxIoa)
-            {
-                problems.Add($"IOA {point.Ioa} is out of range (1 … {MaxIoa}).");
-                continue;
-            }
-
-            if (!tagsById.TryGetValue(point.TagId, out var tag))
-            {
-                problems.Add($"IOA {point.Ioa} references a tag that does not exist.");
-                continue;
-            }
-
-            if (!Enum.IsDefined(point.Type))
-                problems.Add($"IOA {point.Ioa}: unknown point type.");
-            if (!Enum.IsDefined(point.Command))
-                problems.Add($"IOA {point.Ioa}: unknown command type.");
-            if (point.Deadband < 0)
-                problems.Add($"IOA {point.Ioa}: the deadband cannot be negative.");
-            if (point.ReportScale == 0)
-                problems.Add($"IOA {point.Ioa}: a report scale of 0 would send a constant 0.");
-
-            // A status ASDU carrying an analogue value (or the reverse) is a configuration mistake
-            // that would be very hard to spot from the control centre's side.
-            var isStatusType = point.Type is Iec104PointType.SinglePoint or Iec104PointType.DoublePoint;
-            if (isStatusType && tag.DataType != DataType.Bool)
-                problems.Add($"IOA {point.Ioa} ('{tag.Path}'): {point.Type} carries a status bit, " +
-                             $"but the tag is {tag.DataType}.");
-            if (!isStatusType && tag.DataType == DataType.Bool)
-                problems.Add($"IOA {point.Ioa} ('{tag.Path}'): {point.Type} carries a measurand, " +
-                             $"but the tag is Bool — use SinglePoint or DoublePoint.");
-
-            var isStatusCommand = point.Command is Iec104CommandType.SingleCommand or Iec104CommandType.DoubleCommand;
-            if (isStatusCommand && tag.DataType != DataType.Bool)
-                problems.Add($"IOA {point.Ioa} ('{tag.Path}'): {point.Command} writes a status bit, " +
-                             $"but the tag is {tag.DataType}.");
-        }
-
-        return problems;
-    }
+    /// <summary>
+    /// The same check the engine applies when the whole project is validated. It used to be a second,
+    /// near-identical copy here, which had drifted: it missed the select-before-operate rule and the
+    /// AllowWrite rule, so this page accepted a mapping that a later apply refused.
+    /// </summary>
+    private async Task<List<string>> ValidateAsync(Iec104ServerOptions options, CancellationToken ct) =>
+        ProjectValidator.ValidateIec104(options, await _store.GetTagsAsync(ct));
 }

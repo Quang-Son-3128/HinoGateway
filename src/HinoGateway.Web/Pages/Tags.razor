@@ -1,7 +1,10 @@
 @page "/tags"
 @using System.Net.Http.Json
+@implements IAsyncDisposable
 @inject HttpClient Http
+@inject HinoGateway.Web.Security.ApiKeyStore ApiKeys
 @inject ISnackbar Snackbar
+@inject EngineApplyCoordinator Apply
 @inject IDialogService Dialog
 @inject NavigationManager Nav
 
@@ -9,11 +12,15 @@
 
 <div class="page-head">
     <h1>Tag Database</h1>
+    <MudChip T="string" Size="Size.Small"
+             Color="@(_feed?.IsConnected == true ? Color.Success : Color.Error)"
+             Icon="@(_feed?.IsConnected == true ? Icons.Material.Filled.Sensors : Icons.Material.Filled.SensorsOff)"
+             Variant="Variant.Filled">
+        @(_feed?.IsConnected == true ? "LIVE" : "OFFLINE")
+    </MudChip>
     <MudSpacer />
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="NewFolder">New folder</MudButton>
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewTag">New tag</MudButton>
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PublishedWithChanges"
-               OnClick="ApplyAsync" Disabled="_busy">Apply to engine</MudButton>
 </div>
 
 @if (_devices.Count == 0)
@@ -86,9 +93,15 @@
                     <MudTh>Unit</MudTh>
                     <MudTh>Scan</MudTh>
                     <MudTh>Description</MudTh>
+                    <MudTh Style="text-align:right">Value</MudTh>
+                    <MudTh>Quality</MudTh>
                     <MudTh Style="text-align:right">Actions</MudTh>
                 </HeaderContent>
                 <RowTemplate>
+                    @{
+                        // Joined on Path, not Id: TagSample.TagId is the runtime path, TagDto.Id the storage key.
+                        var sample = _feed?.Sample(context.Path);
+                    }
                     <MudTd DataLabel="Name" Class="mono">@context.Name</MudTd>
                     <MudTd DataLabel="Kind">
                         <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@KindColour(context.Kind)">@KindLabel(context.Kind)</MudChip>
@@ -122,6 +135,27 @@
                         }
                     </MudTd>
                     <MudTd DataLabel="Description" Class="txt-sm hino-dim">@context.Description</MudTd>
+                    @* The live value of the tag being configured, on the row that configures it. *@
+                    <MudTd DataLabel="Value" Style="text-align:right">
+                        <span class="tag-value @(sample is not null && TelemetryFeed.IsFresh(sample.LastChanged) ? "changed" : "")">
+                            @(sample is null ? "—" : TelemetryFeed.FormatValue(sample.Value))
+                        </span>
+                        <span class="txt-xs hino-muted">@context.Unit</span>
+                    </MudTd>
+                    <MudTd DataLabel="Quality">
+                        @if (sample is not null)
+                        {
+                            <span class="led @TelemetryFeed.QualityLed(sample.Quality)"></span>
+                            <span class="mono txt-sm" style="color:@TelemetryFeed.QualityCss(sample.Quality)">
+                                @sample.Quality.ToString().ToUpperInvariant()
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="led led-idle"></span>
+                            <span class="mono txt-sm hino-muted">—</span>
+                        }
+                    </MudTd>
                     <MudTd DataLabel="Actions" Style="text-align:right">
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary" OnClick="() => EditTag(context)" />
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteTagAsync(context)" />
@@ -431,10 +465,31 @@
     private List<string> _expressionUnknown = new();
     private string? _expressionPreview;
 
+    private TelemetryFeed? _feed;
+
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
         SelectTagFromQuery();
+
+        // Configuring a tag and finding out whether it reads used to be two pages. The feed is the
+        // same one the Live Data page uses, so there is one definition of what a value looks like.
+        _feed = new TelemetryFeed(Nav, ApiKeys, () => InvokeAsync(StateHasChanged));
+        try
+        {
+            await _feed.StartAsync();
+        }
+        catch
+        {
+            // No key yet, or the gateway is down: the page is a configuration editor first and has
+            // to stay usable without live values. The offline banner already says why.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_feed is not null)
+            await _feed.DisposeAsync();
     }
 
     // Deep link from the Live page: /tags?select=<runtime tag path> jumps to the
@@ -568,10 +623,16 @@
         _tagEdit.SourcePath = SelectedCounter?.Path ?? "";
     }
 
-    private string TagRowStyle(TagDto t, int _) =>
-        t.Id == _highlightTagId
-            ? "background:rgba(59,130,246,.16);box-shadow:inset 3px 0 0 var(--mud-palette-primary)"
-            : "";
+    /// <summary>
+    /// Two things want to colour a row: the deep link from the Live Data page, and a bad reading.
+    /// The deep link wins — it is the answer to something the operator just asked for.
+    /// </summary>
+    private string TagRowStyle(TagDto t, int _)
+    {
+        if (t.Id == _highlightTagId)
+            return "background:rgba(59,130,246,.16);box-shadow:inset 3px 0 0 var(--mud-palette-primary)";
+        return _feed?.Sample(t.Path) is { Quality: Quality.Bad } ? "background:rgba(239,68,68,.06)" : "";
+    }
 
     private async Task LoadAsync()
     {
@@ -713,9 +774,9 @@
     private async Task DeleteFolderAsync()
     {
         var path = CurrentPathLabel;
-        var tagCount = _tags.Count(t => IsInSubtree(t.GroupId, _selectedGroupId));
+        var impact = await CascadeImpact.FetchAsync(Http, $"api/config/groups/{_selectedGroupId}/impact");
         var ok = await Dialog.ShowMessageBoxAsync("Delete folder",
-            $"Delete '{path}' including all sub-folders and {tagCount} tag(s) inside?",
+            $"Delete '{path}' including all sub-folders? {impact.Describe()}",
             yesText: "Delete", cancelText: "Cancel");
         if (ok != true) return;
 
@@ -730,7 +791,8 @@
             }
             _selectedGroupId = RootId;
             await LoadAsync();
-            Snackbar.Add($"Deleted '{path}'. Click \"Apply to engine\" to make it live.", Severity.Info);
+            Snackbar.Add($"Deleted '{path}'.", Severity.Info);
+            await Apply.RequestApplyAsync();
         }
         finally { _busy = false; }
     }
@@ -993,16 +1055,27 @@
             }
             _tagEdit = null;
             await LoadAsync();
-            Snackbar.Add("Saved. Click \"Apply to engine\" to make it live.", Severity.Success);
+            await Apply.RequestApplyAsync();
         }
         finally { _busy = false; }
     }
 
+    /// <summary>
+    /// This had no confirmation at all, on a row whose delete button sits next to edit. It has one
+    /// now, and it quotes what goes with the tag: alarm rules watching it, IEC-104 points mapping it,
+    /// an accumulator counting it.
+    /// </summary>
     private async Task DeleteTagAsync(TagDto t)
     {
         _busy = true;
         try
         {
+            var impact = await CascadeImpact.FetchAsync(Http, $"api/config/tags/{t.Id}/impact");
+            var ok = await Dialog.ShowMessageBoxAsync("Delete tag",
+                $"Delete '{t.Path}'? {impact.Describe(self: 1)}",
+                yesText: "Delete", cancelText: "Cancel");
+            if (ok != true) return;
+
             var resp = await Http.DeleteAsync($"api/config/tags/{t.Id}");
             if (!resp.IsSuccessStatusCode)
             {
@@ -1010,25 +1083,8 @@
                 return;
             }
             await LoadAsync();
-            Snackbar.Add($"Deleted '{t.Path}'. Click \"Apply to engine\" to make it live.", Severity.Info);
-        }
-        finally { _busy = false; }
-    }
-
-    // --- apply ---------------------------------------------------------------
-
-    private async Task ApplyAsync()
-    {
-        _busy = true;
-        try
-        {
-            var resp = await Http.PostAsync("api/config/reload", null);
-            if (!resp.IsSuccessStatusCode)
-            {
-                Snackbar.Add($"Apply failed: {await ApiResponseErrors.ReadAsync(resp)}", Severity.Error);
-                return;
-            }
-            Connections.ReportApply(Snackbar, await resp.Content.ReadFromJsonAsync<Connections.ApplyResult>());
+            Snackbar.Add($"Deleted '{t.Path}'.", Severity.Info);
+            await Apply.RequestApplyAsync();
         }
         finally { _busy = false; }
     }

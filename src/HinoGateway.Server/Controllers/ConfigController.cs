@@ -3,6 +3,7 @@ using System.Text.Json;
 using HinoGateway.Core;
 using HinoGateway.Engine;
 using HinoGateway.Server.Security;
+using HinoGateway.Server.Services;
 using HinoGateway.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -86,24 +87,48 @@ public sealed class ConfigController : ControllerBase
         return NoContent();
     }
 
-    [HttpDelete("devices/{id}")]
-    public async Task<IActionResult> DeleteDevice(string id, CancellationToken ct)
+    /// <summary>What deleting this connection would take with it. Read-only; nothing is changed.</summary>
+    [HttpGet("devices/{id}/impact")]
+    public async Task<ActionResult<CascadeResult>> DeviceImpact(string id,
+        [FromServices] IAlarmStore alarms, CancellationToken ct)
     {
-        // A connection that tags still point at must not disappear from under them.
-        var inUse = (await _store.GetTagsAsync(ct))
-            .Count(t => string.Equals(t.DeviceId, id, StringComparison.OrdinalIgnoreCase));
-        if (inUse > 0)
-            return Conflict($"Connection '{id}' is still used by {inUse} tag(s). Reassign or delete those tags first.");
-
-        var removed = await _store.DeleteDeviceAsync(id, ct);
-        if (removed)
-        {
-            var prefix = $"device.{id}.";
-            foreach (var name in _secrets.Names.Where(n => n.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList())
-                _secrets.Delete(name);
-        }
-        return removed ? NoContent() : NotFound();
+        if (await _store.GetDeviceAsync(id, ct) is null)
+            return NotFound();
+        return await CascadeDelete.PreviewAsync(_store, alarms, await TagsOfDevice(id, ct), ct);
     }
+
+    /// <summary>
+    /// Deletes the connection together with its tags, and whatever only existed for those tags
+    /// (alarm rules, IEC-104 points, accumulators). The caller is expected to have shown the impact
+    /// first - see <see cref="DeviceImpact"/>.
+    /// </summary>
+    [HttpDelete("devices/{id}")]
+    public async Task<ActionResult<CascadeResult>> DeleteDevice(string id,
+        [FromServices] IAlarmStore alarms, CancellationToken ct)
+    {
+        if (await _store.GetDeviceAsync(id, ct) is null)
+            return NotFound();
+
+        CascadeResult cascade;
+        using (var tx = _store.BeginTransaction())
+        {
+            cascade = await CascadeDelete.RemoveTagsAsync(_store, alarms, await TagsOfDevice(id, ct), ct);
+            if (!await _store.DeleteDeviceAsync(id, ct))
+                return NotFound();
+            tx.Commit();
+        }
+
+        var prefix = $"device.{id}.";
+        foreach (var name in _secrets.Names.Where(n => n.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList())
+            _secrets.Delete(name);
+        return cascade;
+    }
+
+    private async Task<IReadOnlyCollection<string>> TagsOfDevice(string deviceId, CancellationToken ct) =>
+        (await _store.GetTagsAsync(ct))
+            .Where(t => string.Equals(t.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase))
+            .Select(t => t.Id)
+            .ToHashSet(StringComparer.Ordinal);
 
     // --- tag folders ---------------------------------------------------------
 
@@ -148,24 +173,47 @@ public sealed class ConfigController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Deletes a folder including all sub-folders and the tags inside them.</summary>
-    [HttpDelete("groups/{id}")]
-    public async Task<IActionResult> DeleteGroup(string id, [FromServices] IAlarmStore alarms, CancellationToken ct)
+    /// <summary>What deleting this folder would take with it. Read-only; nothing is changed.</summary>
+    [HttpGet("groups/{id}/impact")]
+    public async Task<ActionResult<CascadeResult>> GroupImpact(string id,
+        [FromServices] IAlarmStore alarms, CancellationToken ct)
     {
-        // Deleting a folder takes its whole subtree of tags with it — refuse while any of those
-        // tags still has an alarm on it, mirroring the single-tag guard.
         var groups = await _store.GetGroupsAsync(ct);
-        var doomedGroups = Subtree(groups, id);
-        var doomedTags = (await _store.GetTagsAsync(ct))
+        if (groups.All(g => g.Id != id))
+            return NotFound();
+        return await CascadeDelete.PreviewAsync(_store, alarms, await TagsOfSubtree(groups, id, ct), ct);
+    }
+
+    /// <summary>
+    /// Deletes a folder including all sub-folders and the tags inside them, plus whatever only
+    /// existed for those tags (alarm rules, IEC-104 points, accumulators).
+    /// </summary>
+    [HttpDelete("groups/{id}")]
+    public async Task<ActionResult<CascadeResult>> DeleteGroup(string id,
+        [FromServices] IAlarmStore alarms, CancellationToken ct)
+    {
+        var groups = await _store.GetGroupsAsync(ct);
+        if (groups.All(g => g.Id != id))
+            return NotFound();
+
+        using var tx = _store.BeginTransaction();
+        // The store's own DeleteGroupAsync already takes the subtree's tags with it; the cascade
+        // deals with what pointed at those tags from outside the folder.
+        var cascade = await CascadeDelete.RemoveTagsAsync(_store, alarms, await TagsOfSubtree(groups, id, ct), ct);
+        if (!await _store.DeleteGroupAsync(id, ct))
+            return NotFound();
+        tx.Commit();
+        return cascade;
+    }
+
+    private async Task<IReadOnlyCollection<string>> TagsOfSubtree(IReadOnlyList<TagGroupDto> groups,
+        string rootId, CancellationToken ct)
+    {
+        var doomedGroups = Subtree(groups, rootId);
+        return (await _store.GetTagsAsync(ct))
             .Where(t => t.GroupId is not null && doomedGroups.Contains(t.GroupId))
             .Select(t => t.Id)
-            .ToHashSet();
-        var watching = (await alarms.GetAlarmsAsync(ct)).Where(a => doomedTags.Contains(a.TagId)).ToList();
-        if (watching.Count > 0)
-            return Conflict($"Tags in this folder are watched by {watching.Count} alarm(s): {string.Join(", ", watching.Select(a => a.Name))}. Delete those alarms first.");
-
-        var removed = await _store.DeleteGroupAsync(id, ct);
-        return removed ? NoContent() : NotFound();
+            .ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>The folder itself plus every descendant folder id.</summary>
@@ -252,16 +300,31 @@ public sealed class ConfigController : ControllerBase
         return NoContent();
     }
 
-    [HttpDelete("tags/{id}")]
-    public async Task<IActionResult> DeleteTag(string id, [FromServices] IAlarmStore alarms, CancellationToken ct)
+    /// <summary>What deleting this tag would take with it. Read-only; nothing is changed.</summary>
+    [HttpGet("tags/{id}/impact")]
+    public async Task<ActionResult<CascadeResult>> TagImpact(string id,
+        [FromServices] IAlarmStore alarms, CancellationToken ct)
     {
-        // An alarm watching this tag must not be left pointing at nothing.
-        var watching = (await alarms.GetAlarmsAsync(ct)).Where(a => a.TagId == id).ToList();
-        if (watching.Count > 0)
-            return Conflict($"Tag is watched by {watching.Count} alarm(s): {string.Join(", ", watching.Select(a => a.Name))}. Delete those alarms first.");
+        if ((await _store.GetTagsAsync(ct)).All(t => t.Id != id))
+            return NotFound();
+        return await CascadeDelete.PreviewAsync(_store, alarms, new[] { id }, ct);
+    }
 
-        var removed = await _store.DeleteTagAsync(id, ct);
-        return removed ? NoContent() : NotFound();
+    /// <summary>
+    /// Deletes the tag together with the alarm rules watching it, the IEC-104 points mapping it and
+    /// any accumulator counting it - one write, nothing left dangling.
+    /// </summary>
+    [HttpDelete("tags/{id}")]
+    public async Task<ActionResult<CascadeResult>> DeleteTag(string id,
+        [FromServices] IAlarmStore alarms, CancellationToken ct)
+    {
+        if ((await _store.GetTagsAsync(ct)).All(t => t.Id != id))
+            return NotFound();
+
+        using var tx = _store.BeginTransaction();
+        var cascade = await CascadeDelete.RemoveTagsAsync(_store, alarms, new[] { id }, ct);
+        tx.Commit();
+        return cascade;
     }
 
     // --- apply / export / import --------------------------------------------
@@ -278,6 +341,7 @@ public sealed class ConfigController : ControllerBase
     [HttpPost("reload")]
     public async Task<ActionResult<EngineApplyResult>> Reload([FromServices] DeviceEngine engine,
         [FromServices] AlarmEngine alarmEngine, [FromServices] IAlarmStore alarms,
+        [FromServices] CommandEngine commands,
         [FromServices] ILogger<ConfigController> logger, CancellationToken ct)
     {
         var problems = await _validator.ValidateStoredAsync(_store, alarms, ct);
@@ -288,6 +352,9 @@ public sealed class ConfigController : ControllerBase
         var applied = await engine.ReloadAsync(devices, await _store.GetInternalTagsAsync(ct));
         alarmEngine.Reload(AlarmMapping.ToDefinitions(
             await alarms.GetAlarmsAsync(ct), await _store.GetTagsAsync(ct), logger));
+        // Commands bind to runtime paths, which move when a tag or folder is renamed - the same
+        // reason the alarm engine is reloaded here.
+        await commands.ReloadAsync(ct);
         return applied;
     }
 
@@ -307,6 +374,7 @@ public sealed class ConfigController : ControllerBase
             Alarms = (await alarms.GetAlarmsAsync(ct)).ToList(),
             Iec104 = await _store.GetIec104Async(ct),
             Mqtt = await _store.GetMqttAsync(ct),
+            Commands = (await _store.GetCommandsAsync(ct)).ToList(),
         };
 
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(project, ExportJson));
@@ -410,6 +478,9 @@ public sealed class ConfigController : ControllerBase
             if (replace)
             {
                 // Alarms first: they reference tags, and tag deletion is guarded against that.
+                // Commands first: they name tags, and a command left behind pointing at a tag the
+                // import is about to remove would block the very next apply.
+                foreach (var c in await _store.GetCommandsAsync(ct)) { if (await _store.DeleteCommandAsync(c.Id, ct)) removed++; }
                 foreach (var a in await alarms.GetAlarmsAsync(ct)) { if (await alarms.DeleteAlarmAsync(a.Id, ct)) removed++; }
                 foreach (var t in await _store.GetTagsAsync(ct)) { await _store.DeleteTagAsync(t.Id, ct); removed++; }
                 foreach (var g in await _store.GetGroupsAsync(ct)) { if (await _store.DeleteGroupAsync(g.Id, ct)) removed++; }
@@ -428,6 +499,9 @@ public sealed class ConfigController : ControllerBase
 
             foreach (var a in project.Alarms)
                 await alarms.UpsertAlarmAsync(a, ct);
+
+            foreach (var c in project.Commands ?? new List<CommandDto>())
+                await _store.UpsertCommandAsync(c, ct);
 
             if (project.Iec104 is not null)
                 await _store.SaveIec104Async(project.Iec104, ct);
@@ -479,11 +553,14 @@ public sealed class ConfigController : ControllerBase
             Alarms = (await alarms.GetAlarmsAsync(ct)).ToList(),
             Iec104 = await _store.GetIec104Async(ct),
             Mqtt = await _store.GetMqttAsync(ct),
+            Commands = (await _store.GetCommandsAsync(ct)).ToList(),
         };
         current.Devices = Merge(current.Devices, imported.Devices, x => x.Id, StringComparer.OrdinalIgnoreCase);
         current.Groups = Merge(current.Groups, imported.Groups, x => x.Id, StringComparer.Ordinal);
         current.Tags = Merge(current.Tags, imported.Tags, x => x.Id, StringComparer.Ordinal);
         current.Alarms = Merge(current.Alarms, imported.Alarms, x => x.Id, StringComparer.Ordinal);
+        current.Commands = Merge(current.Commands, imported.Commands ?? new List<CommandDto>(),
+            x => x.Id, StringComparer.Ordinal);
         if (imported.Iec104 is not null) current.Iec104 = imported.Iec104;
         if (imported.Mqtt is not null) current.Mqtt = imported.Mqtt;
         return current;

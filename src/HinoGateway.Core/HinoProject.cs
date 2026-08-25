@@ -15,6 +15,7 @@ namespace HinoGateway.Core;
 ///  6 — adds tag kinds: memory and expression tags alongside the device tags.
 ///  7 — splits "commandable" into RequireSelect on the IEC point and AllowWrite on the tag.
 ///  8 — adds accumulator tags (persistent daily/monthly energy from a device counter).
+///  9 — adds commands: a script that runs when a tag is written, and writes on to the plant.
 /// Older files stay importable: version-1 per-device tags are converted into one folder per
 /// device, and collections missing from an older file are simply empty. A version-5 file has no
 /// <c>Kind</c> on its tags, which deserialises to <see cref="TagKind.Device"/> — the only kind that
@@ -23,7 +24,7 @@ namespace HinoGateway.Core;
 public sealed class HinoProject
 {
     public const string FormatTag = "hino-project";
-    public const int CurrentVersion = 8;
+    public const int CurrentVersion = 9;
 
     public string Format { get; set; } = FormatTag;
     public int Version { get; set; } = CurrentVersion;
@@ -42,4 +43,7 @@ public sealed class HinoProject
 
     /// <summary>Since version 5. Null in projects created before MQTT northbound support.</summary>
     public MqttPublisherOptions? Mqtt { get; set; }
+
+    /// <summary>Since version 9. Empty in a file written before commands existed.</summary>
+    public List<CommandDto> Commands { get; set; } = new();
 }

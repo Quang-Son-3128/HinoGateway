@@ -15,19 +15,19 @@
 <div class="page-head">
     <h1>Live Data</h1>
     <MudChip T="string" Size="Size.Small"
-             Color="@(_connected ? Color.Success : Color.Error)"
-             Icon="@(_connected ? Icons.Material.Filled.Sensors : Icons.Material.Filled.SensorsOff)"
+             Color="@(Live ? Color.Success : Color.Error)"
+             Icon="@(Live ? Icons.Material.Filled.Sensors : Icons.Material.Filled.SensorsOff)"
              Variant="Variant.Filled">
-        @(_connected ? "LIVE" : "OFFLINE")
+        @(Live ? "LIVE" : "OFFLINE")
     </MudChip>
     <MudSpacer />
-    <MudText Typo="Typo.caption" Class="mono hino-muted">@_updateCount updates received</MudText>
+    <MudText Typo="Typo.caption" Class="mono hino-muted">@(_feed?.UpdateCount ?? 0) updates received</MudText>
 </div>
 
 @foreach (var alarm in _components.Where(x => x.AlarmActive))
 {
     <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense Class="mb-2">
-        <strong>@alarm.Name</strong>: @alarm.AlarmReason
+        <strong>@ComponentLabel(alarm.Name)</strong>: @alarm.AlarmReason
     </MudAlert>
 }
 
@@ -44,12 +44,12 @@
     </div>
     <div class="kpi kpi-good">
         <div class="kpi-label">Good</div>
-        <div class="kpi-value">@_values.Values.Count(v => v.Quality == Quality.Good)</div>
+        <div class="kpi-value">@Samples.Count(v => v.Quality == Quality.Good)</div>
         <div class="kpi-sub">quality OK</div>
     </div>
     <div class="kpi kpi-bad">
         <div class="kpi-label">Bad / Uncertain</div>
-        <div class="kpi-value">@_values.Values.Count(v => v.Quality != Quality.Good)</div>
+        <div class="kpi-value">@Samples.Count(v => v.Quality != Quality.Good)</div>
         <div class="kpi-sub">needs attention</div>
     </div>
 </div>
@@ -130,10 +130,11 @@ else
             </HeaderContent>
             <RowTemplate>
                 @{
-                    var has = _values.TryGetValue(context.Id, out var s);
+                    var s = _feed?.Sample(context.Id);
+                    var has = s is not null;
                 }
                 <MudTd Style="width:2rem">
-                    <span class="led @(has ? QualityLed(s!.Quality) : "led-idle")"></span>
+                    <span class="led @(has ? TelemetryFeed.QualityLed(s!.Quality) : "led-idle")"></span>
                 </MudTd>
                 <MudTd DataLabel="Tag ID">
                     <MudLink Href="@($"tags?select={Uri.EscapeDataString(context.Id)}")"
@@ -143,15 +144,15 @@ else
                 <MudTd DataLabel="Connection"><span class="mono txt-sm hino-dim">@context.DeviceId</span></MudTd>
                 <MudTd DataLabel="Description" Class="txt-sm hino-dim">@context.Description</MudTd>
                 <MudTd DataLabel="Value" Style="text-align:right">
-                    <span class="tag-value @(has && IsFresh(s!.LastChanged) ? "changed" : "")">
-                        @(has ? FormatValue(s!.Value) : "—")
+                    <span class="tag-value @(has && TelemetryFeed.IsFresh(s!.LastChanged) ? "changed" : "")">
+                        @(has ? TelemetryFeed.FormatValue(s!.Value) : "—")
                     </span>
                     <span class="txt-xs hino-muted">@context.Unit</span>
                 </MudTd>
                 <MudTd DataLabel="Quality">
                     @if (has)
                     {
-                        <span class="mono txt-sm" style="color:@QualityCss(s!.Quality)">@s.Quality.ToString().ToUpperInvariant()</span>
+                        <span class="mono txt-sm" style="color:@TelemetryFeed.QualityCss(s!.Quality)">@s.Quality.ToString().ToUpperInvariant()</span>
                     }
                 </MudTd>
                 <MudTd DataLabel="Message">
@@ -166,7 +167,7 @@ else
                     }
                 </MudTd>
                 <MudTd DataLabel="Last change" Style="text-align:right">
-                    <span class="mono txt-sm hino-dim">@(has ? FormatLastChanged(s!.LastChanged) : "")</span>
+                    <span class="mono txt-sm hino-dim">@(has ? TelemetryFeed.FormatLastChanged(s!.LastChanged) : "")</span>
                 </MudTd>
                 <MudTd Style="text-align:right">
                     <MudTooltip Text="@($"Write a value to {context.Id}")">
@@ -182,17 +183,16 @@ else
 
 @code {
     private readonly Dictionary<string, TagInfo> _infos = new();
-    private readonly Dictionary<string, TagSample> _values = new();
     private List<TagInfo> _view = new();
     private List<DeviceHealth> _health = new();
     private List<ComponentHealthDto> _components = new();
-    private HubConnection? _hub;
+    private TelemetryFeed? _feed;
     private System.Threading.Timer? _healthTimer;
-    private System.Threading.Timer? _renderTimer;
-    private volatile bool _dirty;
-    private bool _connected;
-    private long _updateCount;
     private string _filter = "";
+
+    private bool Live => _feed?.IsConnected == true;
+
+    private IEnumerable<TagSample> Samples => _feed?.Values.Values ?? Enumerable.Empty<TagSample>();
 
     // The visible list is cached and rebuilt only when the tag set or the filter changes —
     // sorting/filtering 10k tags on every render tick would waste the WASM main thread.
@@ -218,7 +218,7 @@ else
             { x => x.TagId, tag.Id },
             { x => x.Name, tag.Name },
             { x => x.Unit, tag.Unit },
-            { x => x.CurrentValue, _values.TryGetValue(tag.Id, out var s) ? FormatValue(s.Value) : null },
+            { x => x.CurrentValue, _feed?.Sample(tag.Id) is { } s ? TelemetryFeed.FormatValue(s.Value) : null },
         };
 
         var dialog = await Dialogs.ShowAsync<WriteValueDialog>("Write value", parameters,
@@ -238,32 +238,8 @@ else
 
         _healthTimer = new System.Threading.Timer(_ => InvokeAsync(RefreshHealthAsync), null, 0, 3000);
 
-        // Render throttle: SignalR can deliver one batch per device per second (100+/s at
-        // scale). Samples are absorbed into _values as they arrive; the UI repaints at most
-        // ~3x/s, only when something actually arrived.
-        _renderTimer = new System.Threading.Timer(_ =>
-        {
-            if (!_dirty) return;
-            _dirty = false;
-            InvokeAsync(StateHasChanged);
-        }, null, 300, 300);
-
-        _hub = new HubConnectionBuilder()
-            .WithUrl(Nav.ToAbsoluteUri("/hubs/telemetry"), options =>
-                options.AccessTokenProvider = ApiKeys.GetAsync)
-            .WithAutomaticReconnect()
-            .Build();
-
-        _hub.On<List<TagSample>>("TagsUpdated", Apply);
-        _hub.Reconnected += _ => { _connected = true; return InvokeAsync(StateHasChanged); };
-        _hub.Reconnecting += _ => { _connected = false; return InvokeAsync(StateHasChanged); };
-        _hub.Closed += _ => { _connected = false; return InvokeAsync(StateHasChanged); };
-
-        await _hub.StartAsync();
-        _connected = true;
-
-        var snapshot = await _hub.InvokeAsync<List<TagSample>>("GetSnapshot");
-        Apply(snapshot);
+        _feed = new TelemetryFeed(Nav, ApiKeys, () => InvokeAsync(StateHasChanged));
+        await _feed.StartAsync();
     }
 
     private async Task RefreshHealthAsync()
@@ -277,31 +253,23 @@ else
         catch { /* server briefly unreachable — keep last known */ }
     }
 
-    private void Apply(List<TagSample> samples)
+    /// <summary>
+    /// The operator sees the part of the gateway that is in trouble, not the identifier the code
+    /// keeps it under. "commands" on a red banner means nothing on a control room screen; "Command
+    /// engine" is something a shift can act on or report.
+    /// </summary>
+    private static string ComponentLabel(string name) => name switch
     {
-        foreach (var s in samples)
-            _values[s.TagId] = s;
-        _updateCount++;
-        _dirty = true; // repaint happens on the next render-timer tick
-    }
-
-    // A value that changed within the last 1.5 s gets the highlight class; the next
-    // render (SignalR pushes every poll) drops the class and CSS fades it out.
-    private static bool IsFresh(DateTimeOffset lastChanged) =>
-        DateTimeOffset.UtcNow - lastChanged < TimeSpan.FromSeconds(1.5);
-
-    private static string QualityLed(Quality q) => q switch
-    {
-        Quality.Good => "led-good",
-        Quality.Uncertain => "led-warn",
-        _ => "led-bad",
-    };
-
-    private static string QualityCss(Quality q) => q switch
-    {
-        Quality.Good => "var(--hino-good)",
-        Quality.Uncertain => "var(--hino-warn)",
-        _ => "var(--hino-bad)",
+        "commands" => "Command engine",
+        "control-commands" => "Command service",
+        "audit-trail" => "Audit trail",
+        "audit-writer" => "Audit writer",
+        "alarm-journal" => "Alarm journal",
+        "history-sampler" => "History sampler",
+        "signalr-telemetry" => "Live data feed",
+        "iec104" => "IEC-104 station",
+        "mqtt" => "MQTT publisher",
+        _ => name,
     };
 
     private static string StateLed(DeviceState s) => s switch
@@ -313,50 +281,23 @@ else
     };
 
     private string RowStyle(TagInfo info, int _) =>
-        _values.TryGetValue(info.Id, out var s) && s.Quality == Quality.Bad
+        _feed?.Sample(info.Id) is { Quality: Quality.Bad }
             ? "background:rgba(239,68,68,.06)"
             : "";
 
     private static string FormatLatency(TimeSpan? t) =>
         t is null ? "— ms" : $"{t.Value.TotalMilliseconds:0} ms";
 
-    // Local time (the operator's), not UTC. Time only while it's today (the common case);
-    // prepend the date once it isn't.
-    private static string FormatLastChanged(DateTimeOffset t)
-    {
-        var local = t.ToLocalTime();
-        return local.Date == DateTime.Now.Date
-            ? local.ToString("HH:mm:ss.fff")
-            : local.ToString("dd/MM HH:mm:ss");
-    }
-
-    private static string FormatValue(object? value)
-    {
-        if (value is null) return "—";
-        if (value is JsonElement je)
-        {
-            return je.ValueKind switch
-            {
-                JsonValueKind.Number => je.GetDouble().ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
-                JsonValueKind.True => "true",
-                JsonValueKind.False => "false",
-                JsonValueKind.String => je.GetString() ?? "",
-                _ => je.ToString()
-            };
-        }
-        return value.ToString() ?? "";
-    }
-
     public async ValueTask DisposeAsync()
     {
         _healthTimer?.Dispose();
-        _renderTimer?.Dispose();
-        if (_hub is not null)
-            await _hub.DisposeAsync();
+        if (_feed is not null)
+            await _feed.DisposeAsync();
     }
 
     private sealed record ComponentHealthDto(
         string Name, bool Running, long Restarts, int RecentRestarts,
         DateTimeOffset LastHeartbeat, DateTimeOffset? LastFailure, string? LastError,
-        bool Stale, bool RestartStorm, bool AlarmActive, string? AlarmReason);
+        bool Stale, bool RestartStorm, bool AlarmActive, string? AlarmReason,
+        bool HeartbeatExpected = true);
 }

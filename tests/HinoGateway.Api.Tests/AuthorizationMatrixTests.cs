@@ -79,6 +79,9 @@ public class AuthorizationMatrixTests
         { "POST", "/api/mqtt/apply", "Admin" },
         { "POST", "/api/iec104/apply", "Admin" },
         { "POST", "/api/iec104/points/csv", "Admin" },
+        // A command is a standing authorisation to move a setpoint, so even reading the list is Admin.
+        { "GET", "/api/commands", "Admin" },
+        { "POST", "/api/commands/check", "Admin" },
     };
 
     [Theory]
@@ -151,6 +154,65 @@ public class AuthorizationMatrixTests
             Assert.False(response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden,
                 $"{route} requires authentication, so nothing can watch this gateway");
         }
+    }
+
+    [Fact]
+    public async Task Checking_a_formula_is_not_an_audit_event()
+    {
+        // The audit writer holds each caller until its batch has reached the disk — right for a PLC
+        // write, wrong for the formula editor, which POSTs on every keystroke because a formula does
+        // not fit in a query string. Both checking endpoints sit at Viewer level, so on a keyless
+        // gateway this was a way for anyone on the LAN to drive the disk and fill the audit files
+        // with events that are not events.
+        using var gateway = Secured();
+        using var client = gateway.CreateClient(ViewerKey);
+
+        for (var i = 0; i < 20; i++)
+        {
+            Assert.Equal(HttpStatusCode.OK,
+                (await client.PostJsonAsync("/api/expressions/validate", new { expression = "1+1" })).StatusCode);
+            Assert.Equal(HttpStatusCode.OK,
+                (await client.PostJsonAsync("/api/expressions/evaluate", new { expression = "1+1" })).StatusCode);
+        }
+
+        Assert.Empty(AuditLines(gateway));
+    }
+
+    [Fact]
+    public async Task A_configuration_change_is_still_audited()
+    {
+        // The other side of it: the guard above must not be a hole for the requests the trail exists
+        // to record.
+        using var gateway = Secured();
+        using var client = gateway.CreateClient(AdminKey);
+
+        await client.PostJsonAsync("/api/config/reload", new { });
+
+        Assert.Contains(AuditLines(gateway), line =>
+            line.Contains("\"actor\":\"admin\"") && line.Contains("/api/config/reload"));
+    }
+
+    /// <summary>Everything the audit writer has put on disk for this gateway, as raw JSONL lines.</summary>
+    private static IReadOnlyList<string> AuditLines(GatewayFactory gateway)
+    {
+        var directory = Path.Combine(gateway.DataRoot, "audit");
+        if (!Directory.Exists(directory))
+            return Array.Empty<string>();
+        // FileShare.ReadWrite because the audit writer keeps its file open for the life of the
+        // gateway; File.ReadAllLines asks for FileShare.Read and is refused.
+        return Directory.EnumerateFiles(directory)
+            .SelectMany(ReadSharedLines)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToList();
+    }
+
+    private static IEnumerable<string> ReadSharedLines(string file)
+    {
+        using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd()
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .ToList();
     }
 
     private static int Rank(string role) => role switch

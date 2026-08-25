@@ -23,6 +23,7 @@ builder.Services.AddScoped(sp =>
     connection.InnerHandler = apiKey;
     return new HttpClient(connection) { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) };
 });
+builder.Services.AddScoped<EngineApplyCoordinator>();
 builder.Services.AddMudServices();
 
 await builder.Build().RunAsync();

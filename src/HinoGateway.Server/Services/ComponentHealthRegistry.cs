@@ -1,4 +1,4 @@
-using HinoGateway.Engine;
+﻿using HinoGateway.Engine;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace HinoGateway.Server.Services;
@@ -22,7 +22,8 @@ public sealed record ComponentHealth(
     bool Stale,
     bool RestartStorm,
     bool AlarmActive,
-    string? AlarmReason);
+    string? AlarmReason,
+    bool HeartbeatExpected = true);
 
 /// <summary>
 /// Tracks the supervised background loops. A component is not declared healthy merely because its
@@ -39,6 +40,7 @@ public sealed class ComponentHealthRegistry
         public DateTimeOffset LastHeartbeat { get; set; } = now;
         public DateTimeOffset? LastFailure { get; set; }
         public string? LastError { get; set; }
+        public bool HeartbeatExpected { get; set; } = true;
         public Queue<DateTimeOffset> RestartTimes { get; } = new();
     }
 
@@ -58,11 +60,21 @@ public sealed class ComponentHealthRegistry
         _recoveryGrace = TimeSpan.FromSeconds(Math.Clamp(options.RecoveryGraceSeconds, 0, 3600));
     }
 
-    public void Running(string name) => MarkAlive(name);
+    /// <summary>A supervised loop has started (or restarted) and will heartbeat from now on.</summary>
+    public void Running(string name) => MarkAlive(name, heartbeatExpected: true);
 
-    public void Heartbeat(string name) => MarkAlive(name);
+    public void Heartbeat(string name) => MarkAlive(name, heartbeatExpected: null);
 
-    private void MarkAlive(string name)
+    /// <summary>
+    /// Declares a component that has no loop of its own: it reports a success or a failure when work
+    /// passes through it, and silence means nothing has been asked of it. Such a component is never
+    /// judged stale — the audit trail of a plant that has had no commands today is not broken, and
+    /// saying so on the operator's screen teaches them to ignore the banner that will one day be real.
+    /// Its failures still alarm, and only the next success clears them.
+    /// </summary>
+    public void EventDriven(string name) => MarkAlive(name, heartbeatExpected: false);
+
+    private void MarkAlive(string name, bool? heartbeatExpected)
     {
         var now = DateTimeOffset.UtcNow;
         lock (_gate)
@@ -71,6 +83,9 @@ public sealed class ComponentHealthRegistry
                 _items[name] = entry = new Entry(name, now);
             entry.Running = true;
             entry.LastHeartbeat = now;
+            // A plain heartbeat leaves the kind alone: whoever declared the component decided that.
+            if (heartbeatExpected is { } expected)
+                entry.HeartbeatExpected = expected;
         }
     }
 
@@ -104,7 +119,7 @@ public sealed class ComponentHealthRegistry
     private ComponentHealth SnapshotOf(Entry entry, DateTimeOffset now)
     {
         Prune(entry, now);
-        var stale = entry.Running && now - entry.LastHeartbeat > _heartbeatTimeout;
+        var stale = entry.Running && entry.HeartbeatExpected && now - entry.LastHeartbeat > _heartbeatTimeout;
         var storm = entry.RestartTimes.Count >= _maxRestarts;
         var recovering = entry.LastFailure is { } failure && now - failure < _recoveryGrace;
         var alarm = !entry.Running || stale || storm || recovering;
@@ -114,7 +129,8 @@ public sealed class ComponentHealthRegistry
             : recovering ? $"Recovering from: {entry.LastError}"
             : null;
         return new ComponentHealth(entry.Name, entry.Running, entry.Restarts, entry.RestartTimes.Count,
-            entry.LastHeartbeat, entry.LastFailure, entry.LastError, stale, storm, alarm, reason);
+            entry.LastHeartbeat, entry.LastFailure, entry.LastError, stale, storm, alarm, reason,
+            entry.HeartbeatExpected);
     }
 
     private void Prune(Entry entry, DateTimeOffset now)

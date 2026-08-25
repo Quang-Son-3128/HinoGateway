@@ -249,8 +249,103 @@ public sealed class ProjectValidator
             problems.AddRange(ValidateIec104(project.Iec104, tags));
         if (project.Mqtt is not null)
             problems.AddRange(ValidateMqtt(project.Mqtt));
+        problems.AddRange(ValidateCommands(project.Commands ?? new List<CommandDto>(), tags, groups));
 
         return problems.Distinct(StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>
+    /// Commands, checked the way formulas are: the script has to compile, every tag it names has to
+    /// exist, and every tag it writes has to be allowed to be written.
+    ///
+    /// <para>
+    /// That last rule is the one that matters. <c>AllowWrite</c> is the switch an engineer sets, per
+    /// tag, to say that this register may be driven from outside; a command that could write to a tag
+    /// without it would be a way around the only safety interlock the configuration has. Checking it
+    /// here, when the command is saved, means the answer arrives with somebody present rather than at
+    /// the moment the control centre sends a curtailment order.
+    /// </para>
+    /// </summary>
+    public static List<string> ValidateCommands(IReadOnlyList<CommandDto> commands,
+        IReadOnlyList<TagDto> tags, IReadOnlyList<TagGroupDto> groups)
+    {
+        var problems = new List<string>();
+        if (commands.Count == 0) return problems;
+
+        AddDuplicates(commands, c => c.Id, StringComparer.Ordinal,
+            id => $"Duplicate command ID '{id}'.", problems);
+
+        var paths = TagPaths.BuildGroupPaths(groups);
+        var byPath = tags
+            .Where(t => !string.IsNullOrWhiteSpace(t.Name))
+            .GroupBy(t => TagPaths.TagPath(paths, t.GroupId, t.Name.Trim()), StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var byId = tags.Where(t => !string.IsNullOrWhiteSpace(t.Id))
+            .GroupBy(t => t.Id, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        foreach (var command in commands)
+            problems.AddRange(ValidateCommand(command, byId, byPath).Select(p => $"Command '{Label(command)}': {p}"));
+
+        return problems;
+
+        static string Label(CommandDto command) =>
+            string.IsNullOrWhiteSpace(command.Name) ? command.Id : command.Name;
+    }
+
+    /// <summary>One command, against the tag database. Also used when a single command is saved.</summary>
+    public static IReadOnlyList<string> ValidateCommand(CommandDto command,
+        IReadOnlyDictionary<string, TagDto> tagsById, IReadOnlyDictionary<string, TagDto> tagsByPath)
+    {
+        var problems = new List<string>();
+        if (string.IsNullOrWhiteSpace(command.Id)) problems.Add("it has no storage ID.");
+        if (string.IsNullOrWhiteSpace(command.Name)) problems.Add("it has no name.");
+
+        if (string.IsNullOrWhiteSpace(command.TriggerTagId))
+        {
+            problems.Add("no trigger tag is selected.");
+        }
+        else if (!tagsById.TryGetValue(command.TriggerTagId, out var trigger))
+        {
+            problems.Add($"its trigger tag '{command.TriggerTagId}' does not exist.");
+        }
+        else if (!trigger.AllowWrite)
+        {
+            // Nothing could ever write to it, so the command could never run - and finding that out
+            // by watching a control centre send an order into silence is the failure this replaces.
+            problems.Add($"its trigger tag '{trigger.Name}' is not writable, so nothing can ever start it.");
+        }
+
+        if (string.IsNullOrWhiteSpace(command.Script))
+        {
+            problems.Add("the script is empty.");
+            return problems;
+        }
+
+        if (!ScriptCompiler.TryCompile(command.Script, out var compiled, out var error, out var position))
+        {
+            problems.Add($"{error} (at character {position + 1}).");
+            return problems;
+        }
+
+        foreach (var path in compiled!.ReadTags.OrderBy(p => p, StringComparer.Ordinal))
+            if (!tagsByPath.ContainsKey(path))
+                problems.Add($"it reads '{path}', which does not exist.");
+
+        foreach (var path in compiled.WrittenTags.OrderBy(p => p, StringComparer.Ordinal))
+        {
+            if (!tagsByPath.TryGetValue(path, out var target))
+            {
+                problems.Add($"it writes to '{path}', which does not exist.");
+                continue;
+            }
+            if (!target.AllowWrite)
+                problems.Add($"it writes to '{path}', whose AllowWrite safety switch is off.");
+            if (target.Kind is TagKind.Expression or TagKind.Accumulator)
+                problems.Add($"it writes to '{path}', which is a computed tag and cannot be written.");
+        }
+
+        return problems;
     }
 
     /// <summary>
@@ -398,7 +493,10 @@ public sealed class ProjectValidator
         var errors = new List<string>();
         if (o.Enabled && string.IsNullOrWhiteSpace(o.Broker)) errors.Add("Broker is required when MQTT is enabled.");
         if (o.Port is < 1 or > 65535) errors.Add("Port must be between 1 and 65535.");
-        if (string.IsNullOrWhiteSpace(o.ClientId)) errors.Add("Client ID is required.");
+        // No rule on an empty client id: empty is the documented default and MqttPublisher derives
+        // "hino-{machine}" from it, so that two gateways out of the box do not claim the same broker
+        // session. Demanding one here meant a gateway that has never touched MQTT could not apply its
+        // configuration at all - every reload failed with "Client ID is required".
         if (string.IsNullOrWhiteSpace(o.PublishTopic) || o.PublishTopic.Contains('#') || o.PublishTopic.Contains('+'))
             errors.Add("Publish topic is required and cannot contain MQTT wildcards.");
         if (o.QoS is < 0 or > 2) errors.Add("QoS must be 0, 1, or 2.");

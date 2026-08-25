@@ -58,6 +58,15 @@ public interface IConfigStore
     // --- Northbound: MQTT publisher ------------------------------------------
     Task<MqttPublisherOptions> GetMqttAsync(CancellationToken ct = default);
     Task SaveMqttAsync(MqttPublisherOptions options, CancellationToken ct = default);
+
+    // --- Commands -------------------------------------------------------------
+    /// <summary>
+    /// Scripts that run when a tag is written. <see cref="CommandDto.TriggerTagPath"/> is filled in
+    /// on read, the same way an IEC point's TagPath is: paths are derived, keys are stored.
+    /// </summary>
+    Task<IReadOnlyList<CommandDto>> GetCommandsAsync(CancellationToken ct = default);
+    Task UpsertCommandAsync(CommandDto command, CancellationToken ct = default);
+    Task<bool> DeleteCommandAsync(string commandId, CancellationToken ct = default);
 }
 
 /// <summary>

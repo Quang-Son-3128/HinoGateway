@@ -19,6 +19,26 @@ public class GatewaySecurityTests
         return new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
     }
 
+    /// <summary>
+    /// The host names that mean "this machine". Table-driven because the interesting cases are the
+    /// spellings, not the logic: an address is checked as an address, so the whole 127.0.0.0/8 range
+    /// counts and not just the one way of writing it, while a name that merely resolves to loopback
+    /// today — which is the entire DNS-rebinding trick — does not.
+    /// </summary>
+    [Theory]
+    [InlineData("localhost", true)]
+    [InlineData("LocalHost", true)]
+    [InlineData("127.0.0.1", true)]
+    [InlineData("127.0.0.53", true)]
+    [InlineData("::1", true)]
+    [InlineData("evil.example", false)]
+    [InlineData("gateway.plant.local", false)]
+    [InlineData("10.20.0.55", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void Only_the_machines_own_names_count_as_the_console(string? host, bool expected) =>
+        Assert.Equal(expected, GatewayApiKeyHandler.IsLoopbackHost(host));
+
     [Theory]
     [InlineData("http://localhost:2000")]
     [InlineData("http://127.0.0.1:2000")]

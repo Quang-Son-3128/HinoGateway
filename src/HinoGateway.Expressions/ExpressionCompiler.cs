@@ -63,12 +63,35 @@ public sealed class CompiledExpression
 public static class ExpressionCompiler
 {
     /// <summary>
+    /// The longest formula this compiler will look at.
+    ///
+    /// <para>
+    /// Not a style rule — a bound on the stack. Both the parser and the evaluator walk the tree by
+    /// recursion, and .NET cannot catch a <c>StackOverflowException</c>: it ends the process, taking
+    /// every poll loop and every northbound link with it. The formula editor's check endpoint takes
+    /// its text from whoever is holding the browser, so "how deep can a caller make this go" is a
+    /// question with a remote answer unless something says otherwise here.
+    /// </para>
+    ///
+    /// <para>
+    /// This is the cheap outer bound; <see cref="Parser"/> holds the two exact ones. 4096 is roughly
+    /// forty times the longest formula in service (99 characters, in the EVN project).
+    /// </para>
+    /// </summary>
+    public const int MaxExpressionLength = 4096;
+
+    /// <summary>
     /// Compile a formula, throwing <see cref="ExpressionSyntaxException"/> — which carries the
     /// character position — when it cannot be read.
     /// </summary>
     public static CompiledExpression Compile(string expression)
     {
         var text = expression ?? "";
+        if (text.Length > MaxExpressionLength)
+            throw new ExpressionSyntaxException(
+                $"the expression is {text.Length} characters long; the limit is {MaxExpressionLength}",
+                MaxExpressionLength);
+
         var tokens = new Lexer(text).Tokenize();
         var parser = new Parser(tokens);
         var root = parser.ParseAll();

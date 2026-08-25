@@ -223,6 +223,7 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
         project.Groups ??= new();
         project.Tags ??= new();
         project.Alarms ??= new();
+        project.Commands ??= new();
 
         if (project.Version < 2)
         {
@@ -270,6 +271,14 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
                     $"{enabled.Count} tag(s) already had as IEC command points, because in that format " +
                     "mapping a point as commandable was the permission. Review each one before applying: " +
                     string.Join(", ", enabled.Select(t => t.Name ?? t.Id).OrderBy(n => n, StringComparer.Ordinal)));
+        }
+
+        // Version 9 added commands. A version 8 file has none, and the list defaults to empty; the
+        // branch is here so that raising CurrentVersion stays a deliberate act with somewhere to put
+        // the conversion when one is finally needed.
+        if (project.Version < 9)
+        {
+            // No conversion required.
         }
 
         // Version 8 added accumulator tags. Nothing to convert — a version 7 file has no tag of that
@@ -830,6 +839,48 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
         return Task.CompletedTask;
     }
 
+    // --- commands ------------------------------------------------------------
+
+    public Task<IReadOnlyList<CommandDto>> GetCommandsAsync(CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var project = CurrentProject;
+            var paths = TagPaths.BuildGroupPaths(project.Groups);
+            var tagPaths = project.Tags.ToDictionary(t => t.Id, t => TagPaths.TagPath(paths, t.GroupId, t.Name));
+
+            var commands = project.Commands.Select(Clone).ToList();
+            foreach (var command in commands)
+                command.TriggerTagPath = tagPaths.GetValueOrDefault(command.TriggerTagId, "");
+            return Task.FromResult<IReadOnlyList<CommandDto>>(commands);
+        }
+    }
+
+    public Task UpsertCommandAsync(CommandDto command, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var project = ProjectForMutation();
+            var copy = Clone(command);
+            copy.TriggerTagPath = "";   // derived on read, never stored
+            var index = project.Commands.FindIndex(c => c.Id == copy.Id);
+            if (index >= 0) project.Commands[index] = copy;
+            else project.Commands.Add(copy);
+        }
+        SaveOrDefer();
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> DeleteCommandAsync(string commandId, CancellationToken ct = default)
+    {
+        bool removed;
+        lock (_gate)
+            removed = ProjectForMutation().Commands.RemoveAll(c => c.Id == commandId) > 0;
+        if (removed)
+            SaveOrDefer();
+        return Task.FromResult(removed);
+    }
+
     // --- northbound: MQTT ----------------------------------------------------
 
     public Task<MqttPublisherOptions> GetMqttAsync(CancellationToken ct = default)
@@ -874,6 +925,9 @@ public sealed class JsonProjectStore : IConfigStore, IAlarmStore
 
     private static MqttPublisherOptions Clone(MqttPublisherOptions options) =>
         JsonSerializer.Deserialize<MqttPublisherOptions>(JsonSerializer.Serialize(options, Json), Json)!;
+
+    private static CommandDto Clone(CommandDto command) =>
+        JsonSerializer.Deserialize<CommandDto>(JsonSerializer.Serialize(command, Json), Json)!;
 
     private static DeviceConfig ToConfig(DeviceDto d, IEnumerable<TagDto> tags,
         IReadOnlyDictionary<string, string> groupPaths) => new()
